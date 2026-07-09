@@ -45,9 +45,9 @@ export class RoadMaterialFactory {
     });
   }
 
-  static async create(renderer: THREE.WebGLRenderer): Promise<RoadMaterialFactory> {
+  static async create(maxAnisotropy: number): Promise<RoadMaterialFactory> {
     const factory = new RoadMaterialFactory();
-    const textureLoader = new RoadTextureLoader(Math.min(renderer.capabilities.getMaxAnisotropy(), 8));
+    const textureLoader = new RoadTextureLoader(Math.min(maxAnisotropy, 8));
     factory.roadTextures = await textureLoader.loadRoadTextures();
     factory.terrainTextures = await textureLoader.loadTerrainTextures();
     Object.assign(factory, factory.createMaterials());

@@ -154,7 +154,7 @@ export class App {
     if (sampleMs < 400) return;
     const fps = this.fpsFrameCount / Math.max(this.fpsAccumulatedSeconds, 0.001);
     this.toolbar?.setFps(fps);
-    (window as typeof window & { __medievalRoadStats?: { fps: number; calls?: number; triangles?: number; pixelRatio?: number } })
+    (window as typeof window & { __medievalRoadStats?: { backend?: string; fps: number; calls?: number; triangles?: number; pixelRatio?: number } })
       .__medievalRoadStats = { fps, ...this.sceneManager?.getPerformanceStats() };
     this.resetFpsSample(time);
   }

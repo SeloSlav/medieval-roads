@@ -8,13 +8,14 @@ export type TerrainBounds = {
 };
 
 export class Terrain {
-  readonly size = 520;
-  readonly resolution = 241;
+  readonly size = 1080;
+  readonly playableSize = 820;
+  readonly resolution = 385;
   readonly bounds: TerrainBounds;
   readonly mesh: THREE.Mesh;
 
   constructor(material: THREE.Material) {
-    const half = this.size * 0.5;
+    const half = this.playableSize * 0.5;
     this.bounds = { minX: -half, maxX: half, minZ: -half, maxZ: half };
     this.mesh = new THREE.Mesh(this.createGeometry(), material);
     this.mesh.name = 'Continuous terrain heightfield';
@@ -23,11 +24,11 @@ export class Terrain {
   }
 
   getHeightAt(x: number, z: number): number {
-    const n1 = this.fbm(x * 0.018, z * 0.018, 4) * 5.8;
-    const n2 = this.fbm(x * 0.052 + 18.4, z * 0.052 - 9.2, 3) * 1.4;
-    const broad = Math.sin(x * 0.018 + z * 0.007) * 1.5 + Math.cos(z * 0.015) * 1.1;
-    const basin = -Math.exp(-(x * x + z * z) / 18000) * 1.8;
-    return n1 + n2 + broad + basin;
+    const n1 = this.fbm(x * 0.014, z * 0.014, 4) * 5.6;
+    const n2 = this.fbm(x * 0.04 + 18.4, z * 0.04 - 9.2, 3) * 1.2;
+    const broad = Math.sin(x * 0.012 + z * 0.005) * 1.35 + Math.cos(z * 0.011) * 1.0;
+    const basin = -Math.exp(-(x * x + z * z) / 52000) * 1.4;
+    return n1 + n2 + broad + basin + this.getEdgeHillHeight(x, z);
   }
 
   getPointAt(x: number, z: number, offset = 0): THREE.Vector3 {
@@ -58,7 +59,8 @@ export class Terrain {
         const x = -half + xIndex * step;
         const z = -half + zIndex * step;
         positions.push(x, this.getHeightAt(x, z), z);
-        uvs.push(x / 18, z / 18);
+        const uv = this.getTerrainUv(x, z);
+        uvs.push(uv.x, uv.y);
         colors.push(...this.getTerrainBlendTint(x, z));
       }
     }
@@ -85,13 +87,18 @@ export class Terrain {
   }
 
   private getTerrainBlendTint(x: number, z: number): [number, number, number] {
-    const dirtNoise = this.fbm(x * 0.022, z * 0.022, 4) + 0.5;
-    const liveNoise = this.fbm(x * 0.0165 + 101.3, z * 0.0165 - 55.8, 4) + 0.5;
-    const deadNoise = this.fbm(x * 0.011 + 31.7, z * 0.011 - 19.4, 4) + 0.5;
-    const gravelNoise = this.fbm(x * 0.038 - 47.2, z * 0.038 + 22.1, 4) + 0.5;
-    const rawDirt = this.smoothstep(0.58, 0.82, dirtNoise) + 0.018;
-    const rawDead = this.smoothstep(0.54, 0.8, deadNoise) + 0.024;
-    const rawLive = this.smoothstep(0.16, 0.56, liveNoise) + 0.28;
+    const warpX = this.fbm(x * 0.006 + 41.1, z * 0.006 - 17.8, 4) * 22;
+    const warpZ = this.fbm(x * 0.006 - 12.5, z * 0.006 + 73.2, 4) * 22;
+    const wx = x + warpX;
+    const wz = z + warpZ;
+    const dirtNoise = this.fbm(wx * 0.019, wz * 0.019, 4) + 0.5;
+    const liveNoise = this.fbm(wx * 0.0135 + 101.3, wz * 0.0135 - 55.8, 4) + 0.5;
+    const deadNoise = this.fbm(wx * 0.0095 + 31.7, wz * 0.0095 - 19.4, 4) + 0.5;
+    const gravelNoise = this.fbm(wx * 0.031 - 47.2, wz * 0.031 + 22.1, 4) + 0.5;
+    const hillT = this.getEdgeHillFactor(x, z);
+    const rawDirt = this.smoothstep(0.6, 0.84, dirtNoise) + 0.024 + hillT * 0.1;
+    const rawDead = this.smoothstep(0.56, 0.82, deadNoise) + 0.03 + hillT * 0.18;
+    const rawLive = this.smoothstep(0.14, 0.58, liveNoise) + 0.34 - hillT * 0.14;
     const primarySum = Math.max(rawDirt + rawDead + rawLive, 0.0001);
     const dirtWeight = rawDirt / primarySum;
     const deadWeight = rawDead / primarySum;
@@ -99,18 +106,45 @@ export class Terrain {
     const gravelOfDirt = this.smoothstep(0.64, 0.86, gravelNoise) * 0.28;
     const gravelWeight = dirtWeight * gravelOfDirt;
     const visibleDirtWeight = dirtWeight * (1 - gravelOfDirt);
-    const macro = this.fbm(x * 0.0085 + 8, z * 0.0085 + 29, 4) + 0.5;
-    const macroMul = 0.9 + macro * 0.22;
+    const macro = this.fbm(wx * 0.007 + 8, wz * 0.007 + 29, 4) + 0.5;
+    const mottled = this.fbm(wx * 0.034 - 9.5, wz * 0.034 + 4.8, 3) + 0.5;
+    const macroMul = 0.88 + macro * 0.18 + mottled * 0.08 - hillT * 0.06;
 
-    const live: [number, number, number] = [0.96, 1.06, 0.9];
-    const dead: [number, number, number] = [1.08, 1.02, 0.86];
-    const dirt: [number, number, number] = [1.08, 0.93, 0.78];
-    const gravel: [number, number, number] = [0.98, 0.98, 0.95];
+    const live: [number, number, number] = [0.94, 1.05, 0.87];
+    const dead: [number, number, number] = [1.06, 1.0, 0.82];
+    const dirt: [number, number, number] = [1.05, 0.91, 0.74];
+    const gravel: [number, number, number] = [0.96, 0.96, 0.91];
     return [
       (live[0] * liveWeight + dead[0] * deadWeight + dirt[0] * visibleDirtWeight + gravel[0] * gravelWeight) * macroMul,
       (live[1] * liveWeight + dead[1] * deadWeight + dirt[1] * visibleDirtWeight + gravel[1] * gravelWeight) * macroMul,
       (live[2] * liveWeight + dead[2] * deadWeight + dirt[2] * visibleDirtWeight + gravel[2] * gravelWeight) * macroMul,
     ];
+  }
+
+  private getTerrainUv(x: number, z: number): THREE.Vector2 {
+    const scale = 42;
+    const rotatedX = x * 0.82 - z * 0.57;
+    const rotatedZ = x * 0.57 + z * 0.82;
+    const warp = this.fbm(x * 0.008 + 13.2, z * 0.008 - 7.4, 3) * 0.36;
+    return new THREE.Vector2(rotatedX / scale + warp, rotatedZ / scale - warp * 0.62);
+  }
+
+  private getEdgeHillHeight(x: number, z: number): number {
+    const t = this.getEdgeHillFactor(x, z);
+    if (t <= 0) return 0;
+
+    const ridge = this.fbm(x * 0.0085 + 37.5, z * 0.0085 - 22.4, 5) + 0.5;
+    const detail = this.fbm(x * 0.026 - 6.2, z * 0.026 + 9.7, 3) + 0.5;
+    const shoulder = t * t * (14 + ridge * 26);
+    const crest = t * t * t * t * (14 + detail * 18);
+    return shoulder + crest;
+  }
+
+  private getEdgeHillFactor(x: number, z: number): number {
+    const edgeDistance = Math.max(Math.abs(x), Math.abs(z));
+    const hillStart = this.playableSize * 0.44;
+    const hillEnd = this.size * 0.5;
+    return this.smoothstep(hillStart, hillEnd, edgeDistance);
   }
 
   private smoothstep(edge0: number, edge1: number, value: number): number {

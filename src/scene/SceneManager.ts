@@ -1,9 +1,4 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { createForestProps } from '../props/ForestProps.ts';
 import type { RoadEdge } from '../roads/RoadEdge.ts';
 import { RoadJunctionBuilder } from '../roads/RoadJunctionBuilder.ts';
@@ -14,53 +9,16 @@ import { SkyCloudMesh } from '../sky/SkyCloudMesh.ts';
 import { Terrain } from '../terrain/Terrain.ts';
 import { TerrainProjector } from '../terrain/TerrainProjector.ts';
 import { disposeObject3D } from '../utils/dispose.ts';
-
-const DAYLIGHT_GRADE_SHADER = {
-  uniforms: {
-    tDiffuse: { value: null },
-    saturation: { value: 1.0 },
-    contrast: { value: 1.03 },
-    vignette: { value: 0.1 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `,
-  fragmentShader: `
-    uniform sampler2D tDiffuse;
-    uniform float saturation;
-    uniform float contrast;
-    uniform float vignette;
-    varying vec2 vUv;
-
-    vec3 adjustSaturation(vec3 color, float amount) {
-      float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-      return mix(vec3(luma), color, amount);
-    }
-
-    void main() {
-      vec3 color = texture2D(tDiffuse, vUv).rgb;
-      color = (color - 0.5) * contrast + 0.5;
-      color = adjustSaturation(color, saturation);
-      color = mix(color, color * vec3(1.03, 1.01, 0.97), 0.18);
-      float distanceFromCenter = distance(vUv, vec2(0.5));
-      float edge = smoothstep(0.18, 0.78, distanceFromCenter);
-      color *= mix(1.0, 1.0 - vignette, edge);
-      gl_FragColor = vec4(max(color, vec3(0.0)), 1.0);
-    }
-  `,
-};
+import { createPostProcessor, type ScenePostProcessor } from './PostProcessing.ts';
+import { createPreferredRenderer, type RendererBackend, type RendererBackendKind, type SupportedRenderer } from './RendererBackend.ts';
 
 export class SceneManager {
   private readonly container: HTMLElement;
   readonly scene: THREE.Scene;
   readonly camera: THREE.PerspectiveCamera;
-  readonly renderer: THREE.WebGLRenderer;
-  readonly composer: EffectComposer;
+  readonly renderer: SupportedRenderer;
+  readonly rendererBackend: RendererBackendKind;
+  readonly postProcessor: ScenePostProcessor;
   readonly cameraTarget = new THREE.Vector3();
   readonly terrain: Terrain;
   readonly terrainProjector: TerrainProjector;
@@ -75,33 +33,37 @@ export class SceneManager {
   private readonly junctionGroup = new THREE.Group();
   private readonly edgeVisuals = new Map<string, { revision: number; group: THREE.Group }>();
 
-  private constructor(container: HTMLElement, renderer: THREE.WebGLRenderer, materials: RoadMaterialFactory) {
+  private constructor(container: HTMLElement, backend: RendererBackend, materials: RoadMaterialFactory) {
     this.container = container;
-    this.renderer = renderer;
+    this.renderer = backend.renderer;
+    this.rendererBackend = backend.kind;
     this.materials = materials;
     this.scene = new THREE.Scene();
     this.scene.background = null;
-    this.scene.fog = new THREE.FogExp2(0xc3d8ef, 0.0012);
-    this.camera = new THREE.PerspectiveCamera(54, 1, 0.1, 1600);
+    this.scene.fog = new THREE.FogExp2(0xc8def1, 0.00082);
+    this.camera = new THREE.PerspectiveCamera(54, 1, 0.1, 2600);
     this.sunDirection.setFromSphericalCoords(1, THREE.MathUtils.degToRad(43), THREE.MathUtils.degToRad(225));
     this.terrain = new Terrain(materials.terrain);
     this.terrainProjector = new TerrainProjector(this.terrain, this.camera, this.renderer.domElement);
     this.roadMeshBuilder = new RoadMeshBuilder(this.terrain, materials);
     this.sky = new SkyCloudMesh({
       sunDirection: this.sunDirection,
-      cloudCoverage: 0.58,
-      cloudHeight: 145,
-      cloudThickness: 78,
-      cloudAbsorption: 0.52,
-      hazeStrength: 0.1,
-      maxCloudDistance: 4200,
-      radius: 1100,
-      windSpeedX: 0.18,
-      windSpeedZ: 0.1,
+      cloudCoverage: 0.3,
+      cloudHeight: 185,
+      cloudThickness: 54,
+      cloudAbsorption: 0.42,
+      hazeStrength: 0.07,
+      maxCloudDistance: 6200,
+      radius: 1900,
+      rayleigh: 0.62,
+      turbidity: 1.2,
+      windSpeedX: 0.12,
+      windSpeedZ: 0.07,
       widthSegments: 56,
       heightSegments: 28,
+      rendererBackend: backend.kind,
     });
-    this.forestGroup = createForestProps(this.terrain, this.renderer.capabilities.getMaxAnisotropy());
+    this.forestGroup = createForestProps(this.terrain, backend.maxAnisotropy);
 
     this.roadGroup.name = 'Road network visuals';
     this.junctionGroup.name = 'Road junction visuals';
@@ -110,22 +72,14 @@ export class SceneManager {
 
     this.scene.add(this.sky, this.terrain.mesh, this.forestGroup, this.roadGroup, this.junctionGroup, this.previewGroup, this.selectionGroup);
     this.addLighting();
-    this.composer = this.createPostProcessing();
+    this.postProcessor = createPostProcessor(backend, this.scene, this.camera);
   }
 
   static async create(container: HTMLElement): Promise<SceneManager> {
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
-    renderer.shadowMap.autoUpdate = false;
-    renderer.shadowMap.needsUpdate = true;
-    renderer.setClearColor(0x86bdf1, 1);
-    container.appendChild(renderer.domElement);
-    const materials = await RoadMaterialFactory.create(renderer);
-    return new SceneManager(container, renderer, materials);
+    const backend = await createPreferredRenderer();
+    container.appendChild(backend.renderer.domElement);
+    const materials = await RoadMaterialFactory.create(backend.maxAnisotropy);
+    return new SceneManager(container, backend, materials);
   }
 
   resize(): void {
@@ -137,8 +91,8 @@ export class SceneManager {
     const pixelRatio = Math.min(window.devicePixelRatio, 1);
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
-    this.composer.setPixelRatio(pixelRatio);
-    this.composer.setSize(width, height);
+    this.postProcessor.setPixelRatio(pixelRatio);
+    this.postProcessor.setSize(width, height);
     this.sky.updateResolution(width * pixelRatio, height * pixelRatio);
   }
 
@@ -147,11 +101,12 @@ export class SceneManager {
     this.sky.updateCamera(this.camera);
     this.sky.updateSun(this.sunDirection);
     this.sky.updateTime(elapsed);
-    this.composer.render(dt);
+    this.postProcessor.render(dt);
   }
 
-  getPerformanceStats(): { calls: number; triangles: number; pixelRatio: number } {
+  getPerformanceStats(): { backend: RendererBackendKind; calls: number; triangles: number; pixelRatio: number } {
     return {
+      backend: this.rendererBackend,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       pixelRatio: this.renderer.getPixelRatio(),
@@ -190,7 +145,7 @@ export class SceneManager {
     disposeObject3D(this.forestGroup);
     (this.forestGroup.userData.disposeResources as (() => void) | undefined)?.();
     this.sky.dispose();
-    this.composer.dispose();
+    this.postProcessor.dispose();
     disposeObject3D(this.junctionGroup);
     disposeObject3D(this.previewGroup);
     disposeObject3D(this.selectionGroup);
@@ -249,16 +204,4 @@ export class SceneManager {
     this.scene.add(blueFill);
   }
 
-  private createPostProcessing(): EffectComposer {
-    const composer = new EffectComposer(this.renderer);
-    composer.addPass(new RenderPass(this.scene, this.camera));
-
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.12, 0.38, 0.82);
-    composer.addPass(bloomPass);
-
-    const gradePass = new ShaderPass(DAYLIGHT_GRADE_SHADER);
-    composer.addPass(gradePass);
-    composer.addPass(new OutputPass());
-    return composer;
-  }
 }

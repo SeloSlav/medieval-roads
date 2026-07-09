@@ -105,11 +105,11 @@ function createTreePlacements(rng: () => number): TreePlacement[] {
     { x: 82, z: 34, species: 'conifer', scale: 1.18 },
   ];
 
-  for (let i = 0; i < 38; i++) {
+  for (let i = 0; i < 66; i++) {
     const angle = i * 2.399963 + rng() * 0.55;
-    const radius = 28 + Math.pow(rng(), 0.72) * 208;
-    const x = Math.cos(angle) * radius + (rng() - 0.5) * 16;
-    const z = Math.sin(angle) * radius + (rng() - 0.5) * 16;
+    const radius = 34 + Math.pow(rng(), 0.7) * 330;
+    const x = Math.cos(angle) * radius + (rng() - 0.5) * 22;
+    const z = Math.sin(angle) * radius + (rng() - 0.5) * 22;
     if (Math.hypot(x, z) < 22) continue;
     placements.push({
       x,
@@ -130,12 +130,12 @@ function createRockPlacements(rng: () => number): Array<{ x: number; z: number; 
     { x: -48, z: -4, scale: 1.4 },
   ];
 
-  for (let i = 0; i < 38; i++) {
+  for (let i = 0; i < 58; i++) {
     const angle = i * 1.713 + rng() * 0.8;
-    const radius = 20 + rng() * 180;
+    const radius = 24 + rng() * 330;
     placements.push({
-      x: Math.cos(angle) * radius + (rng() - 0.5) * 18,
-      z: Math.sin(angle) * radius + (rng() - 0.5) * 18,
+      x: Math.cos(angle) * radius + (rng() - 0.5) * 24,
+      z: Math.sin(angle) * radius + (rng() - 0.5) * 24,
       scale: 0.75 + rng() * 1.8,
     });
   }

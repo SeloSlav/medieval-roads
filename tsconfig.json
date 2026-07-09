@@ -9,6 +9,11 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
+    "paths": {
+      "three/webgpu": ["./src/types/three-webgpu-lite.d.ts"],
+      "three/tsl": ["./src/types/three-tsl-lite.d.ts"],
+      "three/examples/jsm/tsl/display/BloomNode.js": ["./src/types/three-bloom-node-lite.d.ts"]
+    },
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
