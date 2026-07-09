@@ -18,6 +18,7 @@ import {
   GRASS_BLADES_PER_TUFT,
   GRASS_EDGE_FADE_BAND,
   GRASS_STREAM_CHUNK_RADIUS,
+  GRASS_STREAM_FOCUS_DRIFT,
   GRASS_STREAM_SLOTS_PER_FRAME,
   GRASS_TUFT_SCATTER_ATTEMPTS,
   GRASS_TUFTS_PER_CHUNK,
@@ -50,8 +51,6 @@ const MAX_STREAM_INSTANCES = GRID_SIDE * GRID_SIDE * SLOT_CAPACITY;
 const MIN_TUFT_SPACING_SQ = 0.42 * 0.42;
 const MIN_MICRO_TUFT_SPACING_SQ = 0.26 * 0.26;
 const hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
-const copyMatrix = new THREE.Matrix4();
-const copyColor = new THREE.Color();
 
 /** Muted olive — aligned with forest undergrowth. */
 const BLADE_BASE = new THREE.Color(0x3a5032);
@@ -116,13 +115,13 @@ export function createGrassBladeField(
     count: 0,
   }));
 
-  let streamChunkX = Number.NaN;
-  let streamChunkZ = Number.NaN;
+  let anchorChunkX = Number.NaN;
+  let anchorChunkZ = Number.NaN;
+  let anchorFocusX = 0;
+  let anchorFocusZ = 0;
   let needsFullStream = true;
   let roadClearanceDirty = false;
   let pendingSlots: PendingSlot[] = [];
-  let streamFocusX = 0;
-  let streamFocusZ = 0;
   let lastMaterialOpacity = Number.NaN;
   let grassZoomVisible = false;
   let wasFirstPerson = false;
@@ -197,79 +196,41 @@ export function createGrassBladeField(
       }
     }
     pendingSlots.sort((a, b) => a.sortKey - b.sortKey);
-    streamChunkX = centerChunkX;
-    streamChunkZ = centerChunkZ;
-    streamFocusX = focusX;
-    streamFocusZ = focusZ;
+    anchorChunkX = centerChunkX;
+    anchorChunkZ = centerChunkZ;
+    anchorFocusX = focusX;
+    anchorFocusZ = focusZ;
     needsFullStream = false;
     roadClearanceDirty = false;
   };
 
-  const shiftStreamGrid = (
-    deltaChunkX: number,
-    deltaChunkZ: number,
-    newCenterChunkX: number,
-    newCenterChunkZ: number,
-    focusX: number,
-    focusZ: number,
-  ): void => {
-    const nextRecords: SlotRecord[] = Array.from({ length: GRID_SIDE * GRID_SIDE }, () => ({
-      worldChunkX: Number.NaN,
-      worldChunkZ: Number.NaN,
-      count: 0,
-    }));
-    const regen: PendingSlot[] = [];
-
-    for (let localZ = 0; localZ < GRID_SIDE; localZ++) {
-      for (let localX = 0; localX < GRID_SIDE; localX++) {
-        const gridIdx = gridIndex(localX, localZ);
-        const { chunkX, chunkZ } = worldChunkAt(newCenterChunkX, newCenterChunkZ, localX, localZ);
-        const sourceLocalX = localX + deltaChunkX;
-        const sourceLocalZ = localZ + deltaChunkZ;
-
-        if (
-          sourceLocalX >= 0 &&
-          sourceLocalX < GRID_SIDE &&
-          sourceLocalZ >= 0 &&
-          sourceLocalZ < GRID_SIDE
-        ) {
-          const sourceIdx = gridIndex(sourceLocalX, sourceLocalZ);
-          copySlotRange(mesh, sourceIdx, gridIdx, SLOT_CAPACITY);
-          nextRecords[gridIdx] = { worldChunkX: chunkX, worldChunkZ: chunkZ, count: slotRecords[sourceIdx]!.count };
-        } else if (chunkInStreamRange(chunkX, chunkZ, focusX, focusZ)) {
-          regen.push({
-            gridIndex: gridIdx,
-            worldChunkX: chunkX,
-            worldChunkZ: chunkZ,
-            sortKey: slotDistanceSq(chunkX, chunkZ, focusX, focusZ),
-          });
-          nextRecords[gridIdx] = { worldChunkX: chunkX, worldChunkZ: chunkZ, count: 0 };
-        }
-      }
-    }
-
-    slotRecords.splice(0, slotRecords.length, ...nextRecords);
-    regen.sort((a, b) => a.sortKey - b.sortKey);
-    pendingSlots = regen;
-    streamChunkX = newCenterChunkX;
-    streamChunkZ = newCenterChunkZ;
-    streamFocusX = focusX;
-    streamFocusZ = focusZ;
-  };
-
-  const stepPendingSlots = (): void => {
+  const stepPendingSlots = (focusX: number, focusZ: number): void => {
     if (pendingSlots.length === 0) return;
 
     const end = Math.min(GRASS_STREAM_SLOTS_PER_FRAME, pendingSlots.length);
     for (let index = 0; index < end; index++) {
       const slot = pendingSlots[index]!;
-      regenerateSlot(slot.gridIndex, slot.worldChunkX, slot.worldChunkZ, streamFocusX, streamFocusZ);
+      regenerateSlot(slot.gridIndex, slot.worldChunkX, slot.worldChunkZ, focusX, focusZ);
     }
     pendingSlots.splice(0, end);
     refreshMeshCount();
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
+  };
+
+  const shouldRecentreStream = (
+    centerChunkX: number,
+    centerChunkZ: number,
+    focusX: number,
+    focusZ: number,
+  ): boolean => {
+    if (needsFullStream || roadClearanceDirty || !Number.isFinite(anchorChunkX)) return true;
+    if (centerChunkX !== anchorChunkX || centerChunkZ !== anchorChunkZ) return true;
+    const driftSq = GRASS_STREAM_FOCUS_DRIFT * GRASS_STREAM_FOCUS_DRIFT;
+    const dx = focusX - anchorFocusX;
+    const dz = focusZ - anchorFocusZ;
+    return dx * dx + dz * dz >= driftSq;
   };
 
   return {
@@ -313,20 +274,19 @@ export function createGrassBladeField(
       const focusZ = firstPersonActive ? cameraPosition.z : cameraTarget.z;
       const centerChunkX = Math.floor(focusX / GRASS_BLADE_CHUNK_SIZE);
       const centerChunkZ = Math.floor(focusZ / GRASS_BLADE_CHUNK_SIZE);
-      streamFocusX = focusX;
-      streamFocusZ = focusZ;
 
-      const deltaChunkX = Number.isFinite(streamChunkX) ? centerChunkX - streamChunkX : 0;
-      const deltaChunkZ = Number.isFinite(streamChunkZ) ? centerChunkZ - streamChunkZ : 0;
-      const bigJump = Math.abs(deltaChunkX) > 1 || Math.abs(deltaChunkZ) > 1;
+      const chunkChanged =
+        Number.isFinite(anchorChunkX) &&
+        (centerChunkX !== anchorChunkX || centerChunkZ !== anchorChunkZ);
+      const focusDrifted = shouldRecentreStream(centerChunkX, centerChunkZ, focusX, focusZ);
 
-      if (needsFullStream || roadClearanceDirty || bigJump || !Number.isFinite(streamChunkX)) {
+      if (pendingSlots.length > 0 && (chunkChanged || roadClearanceDirty || needsFullStream)) {
         queueFullStream(centerChunkX, centerChunkZ, focusX, focusZ);
-      } else if (deltaChunkX !== 0 || deltaChunkZ !== 0) {
-        shiftStreamGrid(deltaChunkX, deltaChunkZ, centerChunkX, centerChunkZ, focusX, focusZ);
+      } else if (pendingSlots.length === 0 && focusDrifted) {
+        queueFullStream(centerChunkX, centerChunkZ, focusX, focusZ);
       }
 
-      stepPendingSlots();
+      stepPendingSlots(focusX, focusZ);
     },
     dispose() {
       geometry.dispose();

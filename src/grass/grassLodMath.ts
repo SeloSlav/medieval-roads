@@ -51,8 +51,11 @@ export const GRASS_BLADES_PER_TUFT = 9;
 export const GRASS_STREAM_CHUNK_RADIUS =
   Math.ceil(GRASS_BLADE_NEAR_RADIUS / GRASS_BLADE_CHUNK_SIZE) + 2;
 
-/** Slot columns/rows refreshed per frame when walking across chunk lines. */
-export const GRASS_STREAM_SLOTS_PER_FRAME = 3;
+/** Slot columns/rows refreshed per frame when the stream recenters. */
+export const GRASS_STREAM_SLOTS_PER_FRAME = 8;
+
+/** Recentre the grass stream when focus drifts this far (world units). */
+export const GRASS_STREAM_FOCUS_DRIFT = 3.5;
 
 /** Soft falloff band at the outer edge of the grass patch (world units). */
 export const GRASS_EDGE_FADE_BAND = 24;
