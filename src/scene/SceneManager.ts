@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { createForestProps, TREE_SHADOW_CAST_LAYER } from '../props/ForestProps.ts';
 import type { ForestManager } from '../props/ForestManager.ts';
+import { createGrassBladeField, type GrassBladeField } from '../grass/GrassBladeField.ts';
 import { createRiverSystem, type RiverSystem } from '../rivers/RiverSystem.ts';
+import { updateTerrainRoadWear } from '../terrain/TerrainRoadWear.ts';
 import { RiverField } from '../rivers/RiverField.ts';
 import { RiverLayout } from '../rivers/RiverLayout.ts';
 import { setActiveRiverLayout } from '../terrain/TerrainHeight.ts';
@@ -37,6 +39,7 @@ export class SceneManager {
   private readonly sunDirection = new THREE.Vector3();
   private sunLight!: THREE.DirectionalLight;
   private readonly forestManager: ForestManager;
+  private readonly grassField: GrassBladeField;
   private readonly riverSystem: RiverSystem;
   private readonly roadGroup = new THREE.Group();
   private readonly junctionGroup = new THREE.Group();
@@ -76,10 +79,13 @@ export class SceneManager {
       heightSegments: 28,
       rendererBackend: backend.kind,
     });
-    this.riverSystem = createRiverSystem(this.terrain, riverField, backend.maxAnisotropy);
+    this.riverSystem = createRiverSystem(this.terrain, riverField, backend.maxAnisotropy, materials.riverBank);
     this.forestManager = createForestProps(this.terrain, backend.maxAnisotropy, {
       isBlockedAt: (x, z) => this.riverSystem.isBlockedAt(x, z),
       rendererBackend: backend.kind,
+    });
+    this.grassField = createGrassBladeField(this.terrain, {
+      isBlockedAt: (x, z) => this.riverSystem.isBlockedAt(x, z),
     });
 
     this.roadGroup.name = 'Road network visuals';
@@ -90,6 +96,7 @@ export class SceneManager {
     this.scene.add(
       this.sky,
       this.terrain.mesh,
+      this.grassField.group,
       this.riverSystem.group,
       this.forestManager.group,
       this.roadGroup,
@@ -142,23 +149,27 @@ export class SceneManager {
   }
 
   isRoadPathBlocked(path: THREE.Vector3[], roadWidth: number): boolean {
-    if (path.length < 2) return false;
+    return this.getRoadPathBlockReason(path, roadWidth) !== null;
+  }
+
+  getRoadPathBlockReason(path: THREE.Vector3[], roadWidth: number): 'river' | 'rocks' | null {
+    if (path.length < 2) return null;
     const sampled = this.roadMeshBuilder.samplePath(path, 1.25);
-    if (sampled.length < 2) return false;
+    if (sampled.length < 2) return null;
 
     for (const point of sampled) {
-      if (this.riverSystem.isBlockedAt(point.x, point.z)) return true;
+      if (this.riverSystem.isBlockedAt(point.x, point.z)) return 'river';
     }
 
     const roadHalfWidth = roadWidth * 0.5;
     for (const rock of this.forestManager.rockPlacements) {
-      if (isRockNearPath(rock, sampled, roadHalfWidth)) return true;
+      if (isRockNearPath(rock, sampled, roadHalfWidth)) return 'rocks';
     }
     for (const rock of this.riverSystem.shoreRockPlacements) {
-      if (isRockNearPath(rock, sampled, roadHalfWidth)) return true;
+      if (isRockNearPath(rock, sampled, roadHalfWidth)) return 'rocks';
     }
 
-    return false;
+    return null;
   }
 
   syncRoadNetwork(network: RoadNetwork): void {
@@ -176,6 +187,8 @@ export class SceneManager {
 
     this.rebuildJunctions(network);
     this.forestManager.syncRoadClearance(network);
+    this.grassField.syncRoadClearance(network);
+    updateTerrainRoadWear(this.terrain, network);
     this.refreshShadowMap();
   }
 
@@ -199,6 +212,8 @@ export class SceneManager {
     this.edgeVisuals.clear();
     disposeObject3D(this.forestManager.group);
     this.forestManager.dispose();
+    this.grassField.dispose();
+    disposeObject3D(this.grassField.group);
     this.riverSystem.dispose();
     disposeObject3D(this.riverSystem.group);
     this.sky.dispose();

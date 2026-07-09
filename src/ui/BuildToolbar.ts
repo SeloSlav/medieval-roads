@@ -13,6 +13,7 @@ type DeletePopupOptions = {
 
 export class BuildToolbar {
   private readonly roadButton: HTMLButtonElement;
+  private readonly roadControlsPanel: HTMLElement;
   private readonly buildButton: HTMLButtonElement;
   private readonly statusLabel: HTMLElement;
   private readonly deletePopup: HTMLElement;
@@ -32,7 +33,7 @@ export class BuildToolbar {
     },
   ) {
     root.innerHTML = `
-      <aside class="road-controls-panel" aria-label="Road placement instructions">
+      <aside class="road-controls-panel" data-road-controls-panel aria-label="Road placement instructions" hidden>
         <header class="road-controls-header">
           <div>
             <p class="road-controls-eyebrow">Builder</p>
@@ -57,7 +58,9 @@ export class BuildToolbar {
       </aside>
 
       <div class="road-tools" aria-label="Road tools">
-        <button type="button" class="road-tool-button" data-action="road" title="Roads (R)">Roads</button>
+        <button type="button" class="road-tool-button" data-action="road" title="Roads (R)">
+          Roads <span class="road-tool-button-key">(R)</span>
+        </button>
       </div>
 
       <button type="button" class="road-tool-button icon-button floating-build-button" data-action="build" title="Build road (Enter)" aria-label="Build road" disabled hidden>
@@ -86,6 +89,7 @@ export class BuildToolbar {
     `;
 
     this.roadButton = this.mustButton(root, '[data-action="road"]');
+    this.roadControlsPanel = this.mustElement(root, '[data-road-controls-panel]');
     this.buildButton = this.mustButton(root, '[data-action="build"]');
     this.statusLabel = this.mustElement(root, '[data-road-status]');
     this.deletePopup = this.mustElement(root, '[data-delete-popup]');
@@ -109,6 +113,7 @@ export class BuildToolbar {
 
   setStats(stats: ToolbarStats): void {
     const roadMode = stats.mode === 'road';
+    this.roadControlsPanel.hidden = !roadMode;
     this.roadButton.classList.toggle('is-active', roadMode);
     this.roadButton.setAttribute('aria-pressed', String(roadMode));
     this.buildButton.disabled = !stats.canBuild;

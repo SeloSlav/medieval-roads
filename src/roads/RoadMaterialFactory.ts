@@ -15,6 +15,7 @@ export class RoadMaterialFactory {
   readonly snap: THREE.MeshBasicMaterial;
   private roadTextures: TextureSet | null = null;
   private terrainBlendTextures: TerrainBlendTextureSet | null = null;
+  private farTerrainTextures: TextureSet | null = null;
 
   private constructor() {
     this.previewValid = new THREE.MeshStandardMaterial({
@@ -54,6 +55,7 @@ export class RoadMaterialFactory {
     const textureLoader = new RoadTextureLoader(Math.min(maxAnisotropy, 8));
     factory.roadTextures = await textureLoader.loadRoadTextures();
     factory.terrainBlendTextures = await textureLoader.loadTerrainBlendTextures();
+    factory.farTerrainTextures = await textureLoader.loadTerrainTextures();
     Object.assign(factory, factory.createMaterials());
     return factory;
   }
@@ -67,11 +69,18 @@ export class RoadMaterialFactory {
       this.disposeTextureSet(this.terrainBlendTextures.dense);
       this.disposeTextureSet(this.terrainBlendTextures.dry);
     }
+    if (this.farTerrainTextures) this.disposeTextureSet(this.farTerrainTextures);
   }
 
   createTerrainMaterialWithRiverShore(): MeshStandardNodeMaterial {
-    if (!this.roadTextures || !this.terrainBlendTextures) throw new Error('Textures are not loaded.');
-    return createTerrainGrassMaterialWithRiverShore(this.terrainBlendTextures, this.roadTextures);
+    if (!this.roadTextures || !this.terrainBlendTextures || !this.farTerrainTextures) {
+      throw new Error('Textures are not loaded.');
+    }
+    return createTerrainGrassMaterialWithRiverShore(
+      this.terrainBlendTextures,
+      this.roadTextures,
+      this.farTerrainTextures,
+    );
   }
 
   private createMaterials(): {

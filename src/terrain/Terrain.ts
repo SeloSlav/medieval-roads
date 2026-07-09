@@ -60,6 +60,7 @@ export class Terrain {
     const uvs: number[] = [];
     const colors: number[] = [];
     const shoreBlends: number[] = [];
+    const roadWearBlends: number[] = [];
     const indices: number[] = [];
     const step = this.size / (this.resolution - 1);
     const half = this.size * 0.5;
@@ -73,6 +74,7 @@ export class Terrain {
         uvs.push(uv.x, uv.y);
         colors.push(...this.getTerrainBlendWeights(x, z));
         shoreBlends.push(riverField?.sampleMudBlendAt(x, z) ?? 0);
+        roadWearBlends.push(0);
       }
     }
 
@@ -93,6 +95,7 @@ export class Terrain {
     geometry.setAttribute('uv2', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.setAttribute('shoreBlend', new THREE.Float32BufferAttribute(shoreBlends, 1));
+    geometry.setAttribute('roadWearBlend', new THREE.Float32BufferAttribute(roadWearBlends, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     return geometry;

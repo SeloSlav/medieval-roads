@@ -1,6 +1,9 @@
 import * as THREE from 'three';
+import type { MeshStandardNodeMaterial } from 'three/webgpu';
 import type { Terrain } from '../terrain/Terrain.ts';
 import { RiverField } from './RiverField.ts';
+import { createRiverBankMeshes } from './RiverBankMesh.ts';
+import { createRiverReeds } from './RiverReeds.ts';
 import { createRiverShoreStones } from './RiverShoreStones.ts';
 import { createRiverWaterMesh, disposeSharedRiverWaterMaterial } from './RiverWaterMesh.ts';
 import type { RockObstacle } from '../utils/pathGeometry.ts';
@@ -35,6 +38,7 @@ export function createRiverSystem(
   terrain: Terrain,
   riverField: RiverField,
   maxAnisotropy: number,
+  bankMaterial: MeshStandardNodeMaterial,
 ): RiverSystem {
   const group = new THREE.Group();
   group.name = 'River system';
@@ -44,7 +48,9 @@ export function createRiverSystem(
   const rng = mulberry32(0x71ee1212);
   const waterController = createRiverWaterMesh(group, terrain, riverField);
   const shoreStones = createRiverShoreStones(terrain, riverField, rockMaterial, rockShadowMaterials, rng);
-  group.add(shoreStones.group);
+  const bankMeshes = createRiverBankMeshes(terrain, riverField, bankMaterial);
+  const reeds = createRiverReeds(terrain, riverField, rng);
+  group.add(shoreStones.group, bankMeshes, reeds.group);
 
   const dispose = () => {
     waterController?.dispose();
@@ -55,6 +61,7 @@ export function createRiverSystem(
     rockMaterial.roughnessMap?.dispose();
     rockShadowMaterials.shadowCast.dispose();
     rockShadowMaterials.shadowDepth.dispose();
+    reeds.dispose();
   };
 
   return {

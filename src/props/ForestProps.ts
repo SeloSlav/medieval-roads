@@ -3,23 +3,27 @@ import type { Terrain } from '../terrain/Terrain.ts';
 import { ForestManager, type ConiferForestInstances } from './ForestManager.ts';
 import { applyTreeShadowReceiveFilter, setTreeShadowInstanceAttributes } from './treeShadowReceiveFilter.ts';
 import type { RendererBackendKind } from '../scene/RendererBackend.ts';
-
-const UP = new THREE.Vector3(0, 1, 0);
-const TAU = Math.PI * 2;
-/** Layer used for invisible tree shadow proxies — hidden from the main camera, visible to the shadow map. */
-export const TREE_SHADOW_CAST_LAYER = 1;
-const LEGACY_PLAYABLE_SIZE = 496;
-const CENTRAL_CLEARING_RADIUS = 34;
-const BASE_TREE_COUNT = 286;
-const BASE_ROCK_COUNT = 86;
-
-type PropSpawnConfig = {
-  extent: number;
-  treeTargetCount: number;
-  rockTargetCount: number;
-  forestCoreCount: number;
-  rockOutcropCount: number;
-};
+import {
+  CENTRAL_CLEARING_RADIUS,
+  createForestCores,
+  createForestSpawnConfig,
+  distanceToNearest,
+  fbm2,
+  forestDensityAt,
+  hasMinimumDistance,
+  isInsidePlayableExtent,
+  mulberry32,
+  pick,
+  samplePointInForestCore,
+  samplePointInPlayableExtent,
+  type ForestCore,
+} from './forestField.ts';
+import {
+  buildUndergrowthInstances,
+  createUndergrowthMaterials,
+  createUndergrowthPlacements,
+  disposeUndergrowthInstances,
+} from './ForestUndergrowth.ts';
 
 type ForestMaterialSet = {
   bark: THREE.MeshStandardMaterial;
@@ -33,7 +37,7 @@ type ForestMaterialSet = {
 type TreePlacement = {
   x: number;
   z: number;
-  form: 'narrow' | 'broad' | 'young';
+  form: 'narrow' | 'broad' | 'young' | 'midstory';
   scale: number;
 };
 
@@ -43,16 +47,6 @@ type RockPlacement = {
   scale: number;
 };
 
-type ForestCore = {
-  x: number;
-  z: number;
-  radiusX: number;
-  radiusZ: number;
-  rotation: number;
-  strength: number;
-  coniferBias: number;
-};
-
 type RockOutcrop = {
   x: number;
   z: number;
@@ -60,6 +54,11 @@ type RockOutcrop = {
   count: number;
   strength: number;
 };
+
+const UP = new THREE.Vector3(0, 1, 0);
+const TAU = Math.PI * 2;
+/** Layer used for invisible tree shadow proxies — hidden from the main camera, visible to the shadow map. */
+export const TREE_SHADOW_CAST_LAYER = 1;
 
 export type ForestPropsOptions = {
   isBlockedAt?: (x: number, z: number) => boolean;
@@ -72,7 +71,7 @@ export function createForestProps(
   options?: ForestPropsOptions,
 ): ForestManager {
   const rng = mulberry32(0x5eedf0a5);
-  const spawnConfig = createPropSpawnConfig(terrain);
+  const spawnConfig = createForestSpawnConfig(terrain.playableSize);
   const isBlockedAt = options?.isBlockedAt;
   const enableTreeShadowFilter = options?.rendererBackend !== 'webgpu';
   const materials = createForestMaterials(maxAnisotropy, enableTreeShadowFilter);
@@ -80,10 +79,16 @@ export function createForestProps(
   forest.name = 'Road-scale forest props';
   const forestCores = createForestCores(rng, spawnConfig);
   const treePlacements = createTreePlacements(rng, forestCores, spawnConfig, isBlockedAt);
-  const conifer = createConiferForest(treePlacements, terrain, materials, rng);
-  const rockPlacements = createRockPlacements(rng, forestCores, treePlacements, spawnConfig, isBlockedAt);
+  const saplingPlacements = createSaplingPlacements(rng, forestCores, spawnConfig, treePlacements, isBlockedAt);
+  const allTreePlacements = [...treePlacements, ...saplingPlacements];
+  const conifer = createConiferForest(allTreePlacements, terrain, materials, rng);
+  const rockPlacements = createRockPlacements(rng, forestCores, allTreePlacements, spawnConfig, isBlockedAt);
+  const undergrowthPlacements = createUndergrowthPlacements(rng, forestCores, spawnConfig, isBlockedAt);
+  const undergrowthMaterials = createUndergrowthMaterials(maxAnisotropy, options?.rendererBackend, materials.textures);
+  const undergrowth = buildUndergrowthInstances(undergrowthPlacements, terrain, undergrowthMaterials, rng);
 
   forest.add(conifer.group);
+  forest.add(undergrowth.group);
   forest.add(
     createRockField(
       rockPlacements,
@@ -95,20 +100,106 @@ export function createForestProps(
     ),
   );
 
-  return new ForestManager(forest, conifer, rockPlacements, () => disposeForestMaterials(materials));
+  return new ForestManager(
+    forest,
+    conifer,
+    rockPlacements,
+    undergrowth,
+    undergrowthPlacements,
+    terrain,
+    () => {
+      disposeForestMaterials(materials);
+      disposeUndergrowthInstances(undergrowth, undergrowthMaterials);
+    },
+  );
 }
 
-function createPropSpawnConfig(terrain: Terrain): PropSpawnConfig {
-  const extent = terrain.playableSize * 0.5;
-  const areaScale = (terrain.playableSize / LEGACY_PLAYABLE_SIZE) ** 2;
+function createTreePlacements(
+  rng: () => number,
+  forestCores: ForestCore[],
+  spawnConfig: ReturnType<typeof createForestSpawnConfig>,
+  isBlockedAt?: (x: number, z: number) => boolean,
+): TreePlacement[] {
+  const placements: TreePlacement[] = [];
+  let attempts = 0;
 
-  return {
-    extent,
-    treeTargetCount: Math.round(BASE_TREE_COUNT * areaScale),
-    rockTargetCount: Math.round(BASE_ROCK_COUNT * areaScale),
-    forestCoreCount: Math.round(18 + areaScale * 4),
-    rockOutcropCount: Math.round(9 + areaScale * 5),
-  };
+  while (placements.length < spawnConfig.treeTargetCount && attempts < spawnConfig.treeTargetCount * 48) {
+    attempts++;
+    const core = rng() < 0.82 ? pick(forestCores, rng) : undefined;
+    const sampled = core
+      ? samplePointInForestCore(core, rng)
+      : samplePointInPlayableExtent(rng, spawnConfig.extent);
+    const { x, z } = sampled;
+
+    if (!isInsidePlayableExtent(x, z, spawnConfig.extent)) continue;
+    if (Math.hypot(x, z) < CENTRAL_CLEARING_RADIUS + rng() * 18) continue;
+
+    const density = forestDensityAt(x, z, forestCores, spawnConfig.extent);
+    if (density < 0.12 || rng() > density * 1.14) continue;
+
+    const formNoise = valueNoise2(x * 0.025 + 37.2, z * 0.025 - 11.8);
+    const broadChance = THREE.MathUtils.clamp(0.18 + density * 0.34 + (formNoise - 0.5) * 0.22, 0.1, 0.48);
+    const youngChance = THREE.MathUtils.clamp(0.24 - density * 0.12, 0.08, 0.22);
+    const form: TreePlacement['form'] = rng() < broadChance ? 'broad' : rng() < youngChance ? 'young' : 'narrow';
+    const densitySpacing = THREE.MathUtils.lerp(1, 0.68, density);
+    const minDistance =
+      (form === 'broad'
+        ? THREE.MathUtils.lerp(7.2, 4.8, density)
+        : form === 'young'
+          ? THREE.MathUtils.lerp(4.8, 3.2, density)
+          : THREE.MathUtils.lerp(6.1, 3.6, density)) * densitySpacing;
+    if (!hasMinimumDistance(placements, x, z, minDistance)) continue;
+
+    const scale =
+      form === 'broad'
+        ? THREE.MathUtils.lerp(1.02, 1.62, Math.pow(rng(), 0.78)) * THREE.MathUtils.lerp(1.08, 0.94, density)
+        : form === 'young'
+          ? THREE.MathUtils.lerp(0.54, 0.92, Math.pow(rng(), 0.7))
+          : THREE.MathUtils.lerp(0.82, 1.42, Math.pow(rng(), 0.7)) * THREE.MathUtils.lerp(1.04, 0.92, density);
+
+    if (isTreePlacementBlocked(x, z, form, scale, isBlockedAt)) continue;
+
+    placements.push({ x, z, form, scale });
+  }
+
+  return placements;
+}
+
+function createSaplingPlacements(
+  rng: () => number,
+  forestCores: ForestCore[],
+  spawnConfig: ReturnType<typeof createForestSpawnConfig>,
+  existingTrees: TreePlacement[],
+  isBlockedAt?: (x: number, z: number) => boolean,
+): TreePlacement[] {
+  const placements: TreePlacement[] = [];
+  let attempts = 0;
+
+  while (placements.length < spawnConfig.saplingTargetCount && attempts < spawnConfig.saplingTargetCount * 42) {
+    attempts++;
+    const core = pick(forestCores, rng);
+    const { x, z } = samplePointInForestCore(core, rng);
+
+    if (!isInsidePlayableExtent(x, z, spawnConfig.extent)) continue;
+    if (Math.hypot(x, z) < CENTRAL_CLEARING_RADIUS + 8) continue;
+
+    const density = forestDensityAt(x, z, forestCores, spawnConfig.extent);
+    if (density < 0.42 || rng() > density * 1.06) continue;
+
+    const minDistance = THREE.MathUtils.lerp(2.8, 1.9, density);
+    if (!hasMinimumDistance(placements, x, z, minDistance)) continue;
+    if (distanceToNearest(existingTrees, x, z) < 2.4) continue;
+    if (isTreePlacementBlocked(x, z, 'midstory', 0.8, isBlockedAt)) continue;
+
+    placements.push({
+      x,
+      z,
+      form: 'midstory',
+      scale: THREE.MathUtils.lerp(0.72, 1.18, Math.pow(rng(), 0.82)),
+    });
+  }
+
+  return placements;
 }
 
 function createForestMaterials(maxAnisotropy: number, enableTreeShadowFilter: boolean): ForestMaterialSet {
@@ -213,87 +304,6 @@ function createPineBarkTexture(maxAnisotropy: number): THREE.Texture {
   return texture;
 }
 
-function createForestCores(rng: () => number, spawnConfig: PropSpawnConfig): ForestCore[] {
-  const cores: ForestCore[] = [];
-  const edgeMargin = spawnConfig.extent * 0.06;
-  const minCoreDistance = spawnConfig.extent * 0.17;
-  let attempts = 0;
-
-  while (cores.length < spawnConfig.forestCoreCount && attempts < spawnConfig.forestCoreCount * 80) {
-    attempts++;
-    const x = (rng() * 2 - 1) * (spawnConfig.extent - edgeMargin);
-    const z = (rng() * 2 - 1) * (spawnConfig.extent - edgeMargin);
-    if (Math.hypot(x, z) < CENTRAL_CLEARING_RADIUS + 24) continue;
-    if (!hasMinimumDistance(cores, x, z, minCoreDistance)) continue;
-
-    const woodlandNoise = fbm2(x * 0.0045 + 12.4, z * 0.0045 - 8.6, 3);
-    if (woodlandNoise < 0.34 && rng() > woodlandNoise * 1.35) continue;
-
-    const shapeNoise = fbm2(x * 0.009 - 4.2, z * 0.009 + 6.8, 2);
-    cores.push({
-      x: x + (rng() - 0.5) * 14,
-      z: z + (rng() - 0.5) * 14,
-      radiusX: THREE.MathUtils.lerp(58, 118, woodlandNoise) * (0.9 + rng() * 0.22),
-      radiusZ: THREE.MathUtils.lerp(48, 102, shapeNoise) * (0.88 + rng() * 0.24),
-      rotation: rng() * TAU,
-      strength: THREE.MathUtils.lerp(0.72, 1.14, woodlandNoise) * (0.94 + rng() * 0.12),
-      coniferBias: THREE.MathUtils.clamp(THREE.MathUtils.lerp(0.36, 0.78, shapeNoise) + (rng() - 0.5) * 0.1, 0.32, 0.84),
-    });
-  }
-
-  return cores;
-}
-
-function createTreePlacements(
-  rng: () => number,
-  forestCores: ForestCore[],
-  spawnConfig: PropSpawnConfig,
-  isBlockedAt?: (x: number, z: number) => boolean,
-): TreePlacement[] {
-  const placements: TreePlacement[] = [];
-  let attempts = 0;
-
-  while (placements.length < spawnConfig.treeTargetCount && attempts < spawnConfig.treeTargetCount * 48) {
-    attempts++;
-    const core = rng() < 0.72 ? pick(forestCores, rng) : undefined;
-    const sampled = core
-      ? samplePointInForestCore(core, rng)
-      : samplePointInPlayableExtent(rng, spawnConfig.extent);
-    const { x, z } = sampled;
-
-    if (!isInsidePlayableExtent(x, z, spawnConfig.extent)) continue;
-    if (Math.hypot(x, z) < CENTRAL_CLEARING_RADIUS + rng() * 18) continue;
-
-    const density = forestDensityAt(x, z, forestCores, spawnConfig.extent);
-    if (density < 0.14 || rng() > density * 1.12) continue;
-
-    const formNoise = valueNoise2(x * 0.025 + 37.2, z * 0.025 - 11.8);
-    const broadChance = THREE.MathUtils.clamp(0.18 + density * 0.34 + (formNoise - 0.5) * 0.22, 0.1, 0.48);
-    const youngChance = THREE.MathUtils.clamp(0.24 - density * 0.12, 0.08, 0.22);
-    const form: TreePlacement['form'] = rng() < broadChance ? 'broad' : rng() < youngChance ? 'young' : 'narrow';
-    const minDistance =
-      form === 'broad'
-        ? THREE.MathUtils.lerp(7.2, 4.8, density)
-        : form === 'young'
-          ? THREE.MathUtils.lerp(4.8, 3.2, density)
-          : THREE.MathUtils.lerp(6.1, 3.6, density);
-    if (!hasMinimumDistance(placements, x, z, minDistance)) continue;
-
-    const scale =
-      form === 'broad'
-        ? THREE.MathUtils.lerp(1.02, 1.62, Math.pow(rng(), 0.78)) * THREE.MathUtils.lerp(1.08, 0.94, density)
-        : form === 'young'
-          ? THREE.MathUtils.lerp(0.54, 0.92, Math.pow(rng(), 0.7))
-          : THREE.MathUtils.lerp(0.82, 1.42, Math.pow(rng(), 0.7)) * THREE.MathUtils.lerp(1.04, 0.92, density);
-
-    if (isTreePlacementBlocked(x, z, form, scale, isBlockedAt)) continue;
-
-    placements.push({ x, z, form, scale });
-  }
-
-  return placements;
-}
-
 function isTreePlacementBlocked(
   x: number,
   z: number,
@@ -305,7 +315,7 @@ function isTreePlacementBlocked(
   if (isBlockedAt(x, z)) return true;
 
   const canopyRadius =
-    form === 'broad' ? 3.5 * scale : form === 'young' ? 1.9 * scale : 2.9 * scale;
+    form === 'broad' ? 3.5 * scale : form === 'young' || form === 'midstory' ? 1.9 * scale : 2.9 * scale;
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * TAU;
     if (isBlockedAt(x + Math.cos(angle) * canopyRadius, z + Math.sin(angle) * canopyRadius)) return true;
@@ -317,7 +327,7 @@ function createRockPlacements(
   rng: () => number,
   forestCores: ForestCore[],
   treePlacements: TreePlacement[],
-  spawnConfig: PropSpawnConfig,
+  spawnConfig: ReturnType<typeof createForestSpawnConfig>,
   isBlockedAt?: (x: number, z: number) => boolean,
 ): RockPlacement[] {
   const placements: RockPlacement[] = [];
@@ -371,7 +381,7 @@ function createRockPlacements(
 function createRockOutcrops(
   rng: () => number,
   forestCores: ForestCore[],
-  spawnConfig: PropSpawnConfig,
+  spawnConfig: ReturnType<typeof createForestSpawnConfig>,
 ): RockOutcrop[] {
   const outcrops: RockOutcrop[] = [];
   let attempts = 0;
@@ -398,62 +408,6 @@ function createRockOutcrops(
   return outcrops;
 }
 
-function samplePointInForestCore(core: ForestCore, rng: () => number): { x: number; z: number } {
-  const angle = rng() * TAU;
-  const radius = Math.pow(rng(), 0.54);
-  const localX = Math.cos(angle) * core.radiusX * radius;
-  const localZ = Math.sin(angle) * core.radiusZ * radius;
-  const cos = Math.cos(core.rotation);
-  const sin = Math.sin(core.rotation);
-  return {
-    x: core.x + localX * cos - localZ * sin + (rng() - 0.5) * 9,
-    z: core.z + localX * sin + localZ * cos + (rng() - 0.5) * 9,
-  };
-}
-
-function samplePointInPlayableExtent(rng: () => number, extent: number): { x: number; z: number } {
-  return {
-    x: (rng() * 2 - 1) * extent,
-    z: (rng() * 2 - 1) * extent,
-  };
-}
-
-function forestDensityAt(x: number, z: number, forestCores: ForestCore[], extent: number): number {
-  let density = 0;
-  for (const core of forestCores) {
-    density = Math.max(density, forestCoreInfluence(x, z, core) * core.strength);
-  }
-
-  const edgeDistance = Math.max(Math.abs(x), Math.abs(z));
-  const edgeWoods = smoothstep(extent * 0.58, extent * 0.9, edgeDistance) * 0.24;
-  const canopyNoise = fbm2(x * 0.006 + 5.4, z * 0.006 - 8.8, 4);
-  const pocketNoise = fbm2(x * 0.024 - 14.2, z * 0.024 + 3.7, 3);
-  const regionalNoise = fbm2(x * 0.0028 + 21.6, z * 0.0028 - 17.4, 3);
-  const centralClear = smoothstep(CENTRAL_CLEARING_RADIUS, CENTRAL_CLEARING_RADIUS + 34, Math.hypot(x, z));
-  const meadowBreak =
-    0.82 +
-    smoothstep(18, 58, Math.abs(z + Math.sin(x * 0.012) * 34 - extent * 0.16)) * 0.12 +
-    smoothstep(16, 52, Math.abs(x * 0.28 - z - extent * 0.09)) * 0.08;
-
-  density +=
-    edgeWoods +
-    (canopyNoise - 0.4) * 0.3 +
-    (pocketNoise - 0.5) * 0.18 +
-    (regionalNoise - 0.46) * 0.22;
-  return saturate(density * centralClear * meadowBreak);
-}
-
-function forestCoreInfluence(x: number, z: number, core: ForestCore): number {
-  const dx = x - core.x;
-  const dz = z - core.z;
-  const cos = Math.cos(-core.rotation);
-  const sin = Math.sin(-core.rotation);
-  const localX = dx * cos - dz * sin;
-  const localZ = dx * sin + dz * cos;
-  const normalizedDistance = Math.sqrt((localX / core.radiusX) ** 2 + (localZ / core.radiusZ) ** 2);
-  return 1 - smoothstep(0.42, 1.28, normalizedDistance);
-}
-
 function rockSuitabilityAt(x: number, z: number, forestCores: ForestCore[], extent: number): number {
   const forestDensity = forestDensityAt(x, z, forestCores, extent);
   const forestEdge = 1 - Math.abs(forestDensity - 0.46) / 0.46;
@@ -462,30 +416,6 @@ function rockSuitabilityAt(x: number, z: number, forestCores: ForestCore[], exte
   const edgeDistance = Math.max(Math.abs(x), Math.abs(z));
   const ridgeBias = smoothstep(extent * 0.42, extent * 0.82, edgeDistance) * 0.14;
   return saturate(forestEdge * 0.38 + stoneNoise * 0.4 + openGround * 0.14 + ridgeBias);
-}
-
-function isInsidePlayableExtent(x: number, z: number, extent: number): boolean {
-  return Math.abs(x) <= extent && Math.abs(z) <= extent;
-}
-
-function hasMinimumDistance(points: Array<{ x: number; z: number }>, x: number, z: number, minDistance: number): boolean {
-  const minDistanceSq = minDistance * minDistance;
-  for (const point of points) {
-    const dx = x - point.x;
-    const dz = z - point.z;
-    if (dx * dx + dz * dz < minDistanceSq) return false;
-  }
-  return true;
-}
-
-function distanceToNearest(points: Array<{ x: number; z: number }>, x: number, z: number): number {
-  let nearestSq = Infinity;
-  for (const point of points) {
-    const dx = x - point.x;
-    const dz = z - point.z;
-    nearestSq = Math.min(nearestSq, dx * dx + dz * dz);
-  }
-  return Math.sqrt(nearestSq);
 }
 
 function createConiferForest(
@@ -515,7 +445,14 @@ function createConiferForest(
   const shadowTierGeometry = createPineShadowTierGeometry();
   const trunkMesh = new THREE.InstancedMesh(trunkGeometry, materials.bark, placements.length);
   const layerCounts = placements.map((placement) => {
-    const formLayers = placement.form === 'broad' ? 10 : placement.form === 'young' ? 5 : 8;
+    const formLayers =
+      placement.form === 'broad'
+        ? 10
+        : placement.form === 'young'
+          ? 5
+          : placement.form === 'midstory'
+            ? 5
+            : 8;
     return formLayers + Math.floor(rng() * 2);
   });
   const totalLayers = layerCounts.reduce((sum, count) => sum + count, 0);
@@ -555,16 +492,19 @@ function createConiferForest(
     const rootY = terrain.getHeightAt(placement.x, placement.z);
     const isBroad = placement.form === 'broad';
     const isYoung = placement.form === 'young';
-    const heightMul = isBroad ? 0.86 : isYoung ? 0.72 : 1.08;
-    const spreadMul = isBroad ? 1.48 : isYoung ? 0.74 : 1.06;
-    const trunkMul = isBroad ? 1.2 : isYoung ? 0.72 : 1;
-    const height = (13.5 + rng() * 5.2) * placement.scale * heightMul;
+    const isMidstory = placement.form === 'midstory';
+    const heightMul = isBroad ? 0.86 : isYoung ? 0.72 : isMidstory ? 0.44 : 1.08;
+    const spreadMul = isBroad ? 1.48 : isYoung ? 0.74 : isMidstory ? 0.9 : 1.06;
+    const trunkMul = isBroad ? 1.2 : isYoung || isMidstory ? 0.68 : 1;
+    const height = isMidstory
+      ? (3.6 + rng() * 2.6) * placement.scale
+      : (13.5 + rng() * 5.2) * placement.scale * heightMul;
     const trunkRadius = (0.28 + rng() * 0.13) * placement.scale * trunkMul;
     const lean = new THREE.Vector3((rng() - 0.5) * 0.045, 1, (rng() - 0.5) * 0.045).normalize();
-    const lowWhorl = isBroad ? 0.14 : 0.17;
-    const highWhorlSpan = isYoung ? 0.72 : 0.78;
+    const lowWhorl = isBroad ? 0.14 : isMidstory ? 0.18 : 0.17;
+    const highWhorlSpan = isYoung || isMidstory ? 0.72 : 0.78;
     const topTierHeight =
-      (2.02 * (1 - (isBroad ? 0.25 : 0.36)) + 0.18) * placement.scale * (isYoung ? 0.82 : 1);
+      (2.02 * (1 - (isBroad ? 0.25 : 0.36)) + 0.18) * placement.scale * (isYoung || isMidstory ? 0.82 : 1);
     const tierApexLocal = 0.44;
     const trunkHeight = height * (lowWhorl + highWhorlSpan) + tierApexLocal * topTierHeight * 0.72;
     const trunkTop = new THREE.Vector3(placement.x, rootY, placement.z).addScaledVector(lean, trunkHeight);
@@ -581,11 +521,12 @@ function createConiferForest(
       const t = layers > 1 ? i / (layers - 1) : 0;
       const whorl = lowWhorl + t * highWhorlSpan;
       const tierRadius =
-        (3.35 * Math.pow(1 - t, isBroad ? 0.98 : 1.16) + (isYoung ? 0.36 : 0.5)) *
+        (3.35 * Math.pow(1 - t, isBroad ? 0.98 : 1.16) + (isYoung || isMidstory ? 0.36 : 0.5)) *
         placement.scale *
         spreadMul *
         (0.94 + rng() * 0.12);
-      const tierHeight = (2.02 * (1 - t * (isBroad ? 0.25 : 0.36)) + 0.18) * placement.scale * (isYoung ? 0.82 : 1);
+      const tierHeight =
+        (2.02 * (1 - t * (isBroad ? 0.25 : 0.36)) + 0.18) * placement.scale * (isYoung || isMidstory ? 0.82 : 1);
       const sway = (1 - t) * (isBroad ? 0.42 : 0.5);
       position.set(
         placement.x + lean.x * height * whorl + Math.cos(yawOffset + i * 1.74) * sway * rng(),
@@ -807,22 +748,6 @@ function createBoulderGeometry(seed: number): THREE.BufferGeometry {
   return geometry;
 }
 
-function fbm2(x: number, z: number, octaves: number): number {
-  let value = 0;
-  let amplitude = 0.5;
-  let frequency = 1;
-  let amplitudeSum = 0;
-
-  for (let octave = 0; octave < octaves; octave++) {
-    value += valueNoise2(x * frequency, z * frequency) * amplitude;
-    amplitudeSum += amplitude;
-    amplitude *= 0.5;
-    frequency *= 2.03;
-  }
-
-  return value / amplitudeSum;
-}
-
 function valueNoise2(x: number, z: number): number {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
@@ -863,10 +788,6 @@ function stableSurfaceNoise(point: THREE.Vector3, seed: number): number {
   return value - Math.floor(value);
 }
 
-function pick<T>(items: T[], rng: () => number): T {
-  return items[Math.min(items.length - 1, Math.floor(rng() * items.length))];
-}
-
 function disposeForestMaterials(materials: ForestMaterialSet): void {
   materials.bark.dispose();
   materials.rock.dispose();
@@ -874,15 +795,4 @@ function disposeForestMaterials(materials: ForestMaterialSet): void {
   materials.shadowDepth.dispose();
   materials.needles.forEach((material) => material.dispose());
   materials.textures.forEach((texture) => texture.dispose());
-}
-
-function mulberry32(seed: number): () => number {
-  let value = seed >>> 0;
-  return () => {
-    value += 0x6d2b79f5;
-    let t = value;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

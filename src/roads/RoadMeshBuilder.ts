@@ -44,6 +44,8 @@ export class RoadMeshBuilder {
     });
     edgeBlend.name = `Road edge blend ${edge.id}`;
     edgeBlend.userData.edgeId = edge.id;
+    edgeBlend.castShadow = false;
+    edgeBlend.receiveShadow = true;
     edgeBlend.renderOrder = 10;
     group.add(edgeBlend);
     edge.mesh = group;

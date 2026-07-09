@@ -69,6 +69,10 @@ button {
   backdrop-filter: blur(14px);
 }
 
+.road-controls-panel[hidden] {
+  display: none;
+}
+
 .road-controls-header {
   display: block;
 }
@@ -179,6 +183,16 @@ button {
 .road-tool-button {
   min-width: 74px;
   font-weight: 650;
+}
+
+.road-tool-button-key {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.road-tool-button.is-active .road-tool-button-key {
+  color: rgba(32, 29, 21, 0.62);
 }
 
 .road-tool-button.icon-button {
@@ -315,6 +329,77 @@ button {
 
 .fps-panel.is-low .fps-stat:first-child strong {
   color: var(--danger);
+}
+
+.toast-container {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.toast {
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 14px;
+  color: #f8e8e4;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  border-radius: 8px;
+  border: 1px solid rgba(201, 112, 85, 0.55);
+  background: rgba(62, 28, 22, 0.92);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 280ms ease,
+    transform 280ms ease;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.is-dismissing {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.toast--clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.toast--clickable:hover,
+.toast--clickable:focus-visible {
+  border-color: rgba(232, 160, 140, 0.85);
+  outline: none;
+}
+
+.toast--error {
+  color: #f8e8e4;
+  border-color: rgba(201, 112, 85, 0.55);
+  background: rgba(62, 28, 22, 0.92);
+}
+
+.toast--info {
+  color: var(--ink);
+  border-color: var(--line);
+  background: var(--panel-strong);
+}
+
+.toast--success {
+  color: #e8f2dd;
+  border-color: rgba(132, 166, 107, 0.55);
+  background: rgba(28, 42, 24, 0.92);
 }
 
 .fatal {

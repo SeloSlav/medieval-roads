@@ -1,5 +1,5 @@
 import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { float, mix, pow, smoothstep, texture, uv, vec3 } from 'three/tsl';
+import { float, mix, normalMap, pow, smoothstep, texture, uv, vec3 } from 'three/tsl';
 import type { TextureSet } from './RoadTextureLoader.ts';
 
 type TslNode = {
@@ -68,7 +68,7 @@ export function createRoadCoreMaterial(textures: TextureSet): MeshStandardNodeMa
   material.roughness = 0.99;
   material.metalness = 0;
   material.colorNode = buildRoadColorNode(textures, 0.72, [0.9, 0.9, 0.88]);
-  material.normalNode = texture(textures.normal, uv());
+  material.normalNode = normalMap(texture(textures.normal, uv()));
   material.roughnessNode = (texture(textures.roughness, uv() as TslNode) as TslNode).r;
   if (textures.ao) material.aoNode = (texture(textures.ao, uv() as TslNode) as TslNode).r;
   return material;
@@ -85,7 +85,7 @@ export function createRoadEdgeMaterial(textures: TextureSet): MeshStandardNodeMa
   material.depthWrite = false;
   if (textures.edgeMask) material.alphaMap = textures.edgeMask;
   material.colorNode = buildRoadColorNode(textures, 0.78, [0.92, 0.91, 0.89]);
-  material.normalNode = texture(textures.normal, uv());
+  material.normalNode = normalMap(texture(textures.normal, uv()));
   material.roughnessNode = (texture(textures.roughness, uv() as TslNode) as TslNode).r;
   if (textures.ao) material.aoNode = (texture(textures.ao, uv() as TslNode) as TslNode).r;
   material.opacityNode = buildBankOpacityNode(textures);
@@ -103,7 +103,7 @@ export function createRiverBankMaterial(textures: TextureSet): MeshStandardNodeM
   material.depthWrite = false;
   if (textures.edgeMask) material.alphaMap = textures.edgeMask;
   material.colorNode = buildMuddyBankColorNode(textures);
-  material.normalNode = texture(textures.normal, uv());
+  material.normalNode = normalMap(texture(textures.normal, uv()));
   const roughSample = (texture(textures.roughness, uv() as TslNode) as TslNode).r;
   material.roughnessNode = mix(roughSample, float(0.58) as TslNode, float(0.42) as TslNode);
   if (textures.ao) material.aoNode = (texture(textures.ao, uv() as TslNode) as TslNode).r;

@@ -5,6 +5,8 @@ import { RoadSelection } from '../roads/RoadSelection.ts';
 import { RoadTool } from '../roads/RoadTool.ts';
 import { SceneManager } from '../scene/SceneManager.ts';
 import { BuildToolbar, type ToolbarStats } from '../ui/BuildToolbar.ts';
+import { ToastManager } from '../ui/ToastManager.ts';
+import { roadPlacementReasonToToastId } from '../ui/toastMessages.ts';
 
 const TARGET_MAX_FPS = 90;
 const TARGET_FRAME_MS = 1000 / TARGET_MAX_FPS;
@@ -18,6 +20,7 @@ export class App {
   private roadTool: RoadTool | null = null;
   private roadSelection: RoadSelection | null = null;
   private toolbar: BuildToolbar | null = null;
+  private toastManager: ToastManager | null = null;
   private animationId = 0;
   private lastTime = 0;
   private frameBudgetTime = 0;
@@ -50,6 +53,7 @@ export class App {
       domElement: sceneManager.renderer.domElement,
       bounds: sceneManager.terrain.bounds,
       getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
+      pickAtScreen: (clientX, clientY) => sceneManager.terrainProjector.pick(clientX, clientY),
       getCursorOverride: () => this.roadTool?.getCursor() ?? null,
       shouldIgnoreInput: (event) => this.roadTool?.shouldBlockCameraInput(event) ?? false,
     });
@@ -87,12 +91,17 @@ export class App {
           onCancel: () => roadSelection.setSelected(null),
         });
       },
+      onPlacementRejected: (event) => {
+        const messageId = roadPlacementReasonToToastId(event.reason);
+        if (messageId) this.toastManager?.showMessageId(messageId, { variant: 'error' });
+      },
     });
 
     const toolbar = new BuildToolbar(uiRoot, {
       onOpenRoads: () => roadTool.setEnabled(!roadTool.isEnabled()),
       onBuildRoad: () => roadTool.commitDraft(),
     });
+    const toastManager = new ToastManager(uiRoot);
 
     this.sceneManager = sceneManager;
     this.input = input;
@@ -101,6 +110,7 @@ export class App {
     this.roadTool = roadTool;
     this.roadSelection = roadSelection;
     this.toolbar = toolbar;
+    this.toastManager = toastManager;
 
     sceneManager.syncRoadNetwork(roadNetwork);
     this.syncToolbar();
@@ -119,6 +129,7 @@ export class App {
     window.removeEventListener('resize', this.onResize);
     this.roadTool?.dispose();
     this.roadSelection?.dispose();
+    this.toastManager?.dispose();
     this.cameraController?.dispose();
     this.input?.dispose();
     this.sceneManager?.dispose();

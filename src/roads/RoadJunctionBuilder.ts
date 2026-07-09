@@ -48,6 +48,10 @@ export class RoadJunctionBuilder {
       const frame = this.endpointFrame(node, edge, width);
       const blend = this.buildEndpointBlendCap(frame, width);
       const core = this.buildEndpointCoreCap(frame, width);
+      blend.castShadow = false;
+      blend.receiveShadow = true;
+      core.castShadow = false;
+      core.receiveShadow = true;
       blend.renderOrder = 10;
       core.renderOrder = 11;
       group.add(blend, core);
@@ -59,6 +63,10 @@ export class RoadJunctionBuilder {
     const directions = edges.map((edge) => inwardDirectionAtNode(edge, node.id));
     const core = this.buildJunctionPatchMesh(node.position, directions, radius, width, false);
     const blend = this.buildJunctionPatchMesh(node.position, directions, blendRadius, width, true);
+    blend.castShadow = false;
+    blend.receiveShadow = true;
+    core.castShadow = false;
+    core.receiveShadow = true;
     core.renderOrder = 11;
     blend.renderOrder = 10;
     group.add(blend, core);

@@ -4,6 +4,11 @@ import type { RoadNetwork, RoadNetworkSnapshot } from './RoadNetwork.ts';
 import type { RoadSelection } from './RoadSelection.ts';
 import type { SceneManager } from '../scene/SceneManager.ts';
 import { RoadPreview } from './RoadPreview.ts';
+import {
+  isRoadPlacementValid,
+  validateRoadPlacement,
+  type RoadPlacementFailureReason,
+} from './RoadPlacementValidation.ts';
 
 const ROAD_WIDTH = 4.2;
 const MIN_POINT_DISTANCE = 1.05;
@@ -19,6 +24,11 @@ export type RoadDeleteRequest = {
   clientY: number;
 };
 
+export type RoadPlacementRejectedEvent = {
+  reason: RoadPlacementFailureReason;
+  action: 'exit';
+};
+
 export class RoadTool {
   private readonly options: {
     domElement: HTMLElement;
@@ -29,6 +39,7 @@ export class RoadTool {
     onNetworkChanged: () => void;
     onStateChanged: () => void;
     onDeleteRequested: (request: RoadDeleteRequest | null) => void;
+    onPlacementRejected?: (event: RoadPlacementRejectedEvent) => void;
   };
   private enabled = false;
   private points: THREE.Vector3[] = [];
@@ -48,6 +59,7 @@ export class RoadTool {
     onNetworkChanged: () => void;
     onStateChanged: () => void;
     onDeleteRequested: (request: RoadDeleteRequest | null) => void;
+    onPlacementRejected?: (event: RoadPlacementRejectedEvent) => void;
   }) {
     this.options = options;
     this.preview = new RoadPreview(options.sceneManager.roadMeshBuilder, options.sceneManager.materials);
@@ -67,7 +79,7 @@ export class RoadTool {
   }
 
   isDraftBuildable(): boolean {
-    return this.isPlacementValid(this.buildDraftPath());
+    return isRoadPlacementValid(this.buildDraftPath(), this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH);
   }
 
   setEnabled(enabled: boolean): void {
@@ -105,7 +117,7 @@ export class RoadTool {
 
   commitDraft(): void {
     const path = this.buildDraftPath();
-    if (!this.isPlacementValid(path)) return;
+    if (!isRoadPlacementValid(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH)) return;
     const snapshot = this.options.network.snapshot();
     const added = this.options.network.addRoadPath(path, ROAD_WIDTH);
     if (added.length === 0) return;
@@ -173,8 +185,10 @@ export class RoadTool {
     if (!hit) return;
     event.preventDefault();
     event.stopPropagation();
-    if (this.shouldExitOnInvalidClick()) {
+    const exitReason = this.getInvalidClickExitReason();
+    if (exitReason) {
       this.setEnabled(false);
+      this.options.onPlacementRejected?.({ reason: exitReason, action: 'exit' });
       return;
     }
     this.options.onDeleteRequested(null);
@@ -285,7 +299,7 @@ export class RoadTool {
     const anchors = hover ? [...this.points, hover] : [...this.points];
     const curves = hover ? [...this.segmentCurves, this.pendingCurve] : this.segmentCurves;
     const path = this.buildPathFromAnchors(anchors, curves);
-    const valid = this.isPlacementValid(path);
+    const valid = isRoadPlacementValid(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH);
     this.preview.update(path, valid, ROAD_WIDTH, this.latestSnapPoint, anchors);
   }
 
@@ -365,36 +379,19 @@ export class RoadTool {
     return null;
   }
 
-  private shouldExitOnInvalidClick(): boolean {
+  private getInvalidClickExitReason(): RoadPlacementFailureReason | null {
     const hover = this.getUsableHoverPoint();
-    if (!hover || !this.hasDraft()) return false;
+    if (!hover || !this.hasDraft()) return null;
     const path = this.buildPathFromAnchors(
       [...this.points, hover],
       [...this.segmentCurves, this.pendingCurve],
     );
-    if (path.length < 2) return false;
-    if (this.options.sceneManager.isRoadPathBlocked(path, ROAD_WIDTH)) return true;
-    if (pathLength(path) < MIN_COMMIT_LENGTH) return false;
-    return !this.isPlacementValid(path);
-  }
+    if (path.length < 2) return null;
 
-  private isPlacementValid(points: THREE.Vector3[]): boolean {
-    if (points.length < 2) return false;
-    if (pathLength(points) < MIN_COMMIT_LENGTH) return false;
-    for (let i = 1; i < points.length; i++) {
-      const dxz = distanceXZ(points[i - 1], points[i]);
-      const dy = Math.abs(points[i].y - points[i - 1].y);
-      if (dxz > 0.1 && dy / dxz > 0.45) return false;
-    }
-    if (this.options.sceneManager.isRoadPathBlocked(points, ROAD_WIDTH)) return false;
-    return true;
+    const result = validateRoadPlacement(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH);
+    if (result.ok || result.reason === 'too_short') return null;
+    return result.reason;
   }
-}
-
-function pathLength(points: THREE.Vector3[]): number {
-  let length = 0;
-  for (let i = 1; i < points.length; i++) length += distanceXZ(points[i - 1], points[i]);
-  return length;
 }
 
 function distanceXZ(a: THREE.Vector3, b: THREE.Vector3): number {
