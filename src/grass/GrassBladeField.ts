@@ -125,6 +125,7 @@ export function createGrassBladeField(
   let lastMaterialOpacity = Number.NaN;
   let grassZoomVisible = false;
   let wasFirstPerson = false;
+  let wasGrassVisible = false;
 
   const chunkInStreamRange = (chunkX: number, chunkZ: number, focusX: number, focusZ: number): boolean => {
     const chunkCenterX = (chunkX + 0.5) * GRASS_BLADE_CHUNK_SIZE;
@@ -267,22 +268,20 @@ export function createGrassBladeField(
       mesh.visible = grassZoomVisible;
       if (!grassZoomVisible) {
         pendingSlots = [];
+        wasGrassVisible = false;
         return;
       }
+      if (!wasGrassVisible) {
+        needsFullStream = true;
+      }
+      wasGrassVisible = true;
 
       const focusX = firstPersonActive ? cameraPosition.x : cameraTarget.x;
       const focusZ = firstPersonActive ? cameraPosition.z : cameraTarget.z;
       const centerChunkX = Math.floor(focusX / GRASS_BLADE_CHUNK_SIZE);
       const centerChunkZ = Math.floor(focusZ / GRASS_BLADE_CHUNK_SIZE);
 
-      const chunkChanged =
-        Number.isFinite(anchorChunkX) &&
-        (centerChunkX !== anchorChunkX || centerChunkZ !== anchorChunkZ);
-      const focusDrifted = shouldRecentreStream(centerChunkX, centerChunkZ, focusX, focusZ);
-
-      if (pendingSlots.length > 0 && (chunkChanged || roadClearanceDirty || needsFullStream)) {
-        queueFullStream(centerChunkX, centerChunkZ, focusX, focusZ);
-      } else if (pendingSlots.length === 0 && focusDrifted) {
+      if (shouldRecentreStream(centerChunkX, centerChunkZ, focusX, focusZ)) {
         queueFullStream(centerChunkX, centerChunkZ, focusX, focusZ);
       }
 
@@ -310,24 +309,6 @@ function createDisabledGrassBladeField(): GrassBladeField {
 function clearSlotRange(mesh: THREE.InstancedMesh, startIndex: number, capacity: number): void {
   for (let index = 0; index < capacity; index++) {
     mesh.setMatrixAt(startIndex + index, hiddenMatrix);
-  }
-}
-
-function copySlotRange(
-  mesh: THREE.InstancedMesh,
-  fromSlot: number,
-  toSlot: number,
-  capacity: number,
-): void {
-  const fromStart = fromSlot * capacity;
-  const toStart = toSlot * capacity;
-  for (let index = 0; index < capacity; index++) {
-    mesh.getMatrixAt(fromStart + index, copyMatrix);
-    mesh.setMatrixAt(toStart + index, copyMatrix);
-    if (mesh.instanceColor) {
-      mesh.getColorAt(fromStart + index, copyColor);
-      mesh.setColorAt(toStart + index, copyColor);
-    }
   }
 }
 
