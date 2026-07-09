@@ -1,4 +1,5 @@
 ﻿import { CameraController } from '../camera/CameraController.ts';
+import { FirstPersonController } from '../camera/FirstPersonController.ts';
 import { InputManager } from '../input/InputManager.ts';
 import { RoadMaterialFactory } from '../roads/RoadMaterialFactory.ts';
 import { RoadNetwork } from '../roads/RoadNetwork.ts';
@@ -17,6 +18,7 @@ export class App {
   private readonly root: HTMLElement;
   private sceneManager: SceneManager | null = null;
   private cameraController: CameraController | null = null;
+  private firstPersonController: FirstPersonController | null = null;
   private input: InputManager | null = null;
   private roadNetwork: RoadNetwork | null = null;
   private roadTool: RoadTool | null = null;
@@ -61,8 +63,28 @@ export class App {
       domElement: sceneManager.renderer.domElement,
       bounds: sceneManager.terrain.bounds,
       getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
-      getCursorOverride: () => this.roadTool?.getCursor() ?? null,
+      getCursorOverride: () => this.firstPersonController?.isActive() ? 'default' : this.roadTool?.getCursor() ?? null,
       shouldIgnoreInput: (event) => this.roadTool?.shouldBlockCameraInput(event) ?? false,
+    });
+
+    const firstPersonController = new FirstPersonController({
+      camera: sceneManager.camera,
+      domElement: sceneManager.renderer.domElement,
+      bounds: sceneManager.terrain.bounds,
+      getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
+      getOrbitSpawn: () => {
+        const target = cameraController.getTargetPosition();
+        return { x: target.x, z: target.z, yaw: cameraController.getYaw() };
+      },
+      onModeChange: (active) => {
+        cameraController.setInputEnabled(!active);
+        if (active) {
+          if (roadTool.isEnabled()) roadTool.setEnabled(false);
+          return;
+        }
+        const pos = firstPersonController.getPosition();
+        cameraController.syncFromFirstPerson(pos.x, pos.z, firstPersonController.getBodyYaw());
+      },
     });
 
     const roadSelection = new RoadSelection({
@@ -114,6 +136,7 @@ export class App {
     this.input = input;
     this.roadNetwork = roadNetwork;
     this.cameraController = cameraController;
+    this.firstPersonController = firstPersonController;
     this.roadTool = roadTool;
     this.roadSelection = roadSelection;
     this.toolbar = toolbar;
@@ -151,6 +174,7 @@ export class App {
     this.roadTool?.dispose();
     this.roadSelection?.dispose();
     this.toastManager?.dispose();
+    this.firstPersonController?.dispose();
     this.cameraController?.dispose();
     this.input?.dispose();
     this.sceneManager?.dispose();
@@ -168,11 +192,21 @@ export class App {
     if (rawDt > 0.25) this.resetFpsSample(time);
     const dt = Math.min(0.05, Math.max(0.001, rawDt));
     this.lastTime = time;
-    this.cameraController?.update(dt);
-    this.toolbar?.setZoomPercent(this.cameraController?.getZoomPercent() ?? 100);
-    this.roadTool?.update(dt);
-    this.updateBuildButtonPosition();
-    this.sceneManager?.render(dt, this.cameraController?.getOrbitDistance());
+    const firstPersonActive = this.firstPersonController?.isActive() ?? false;
+    if (firstPersonActive) {
+      this.firstPersonController?.update(dt);
+      this.toolbar?.setFirstPersonMode(true);
+      this.roadTool?.update(dt);
+      this.updateBuildButtonPosition();
+      this.sceneManager?.render(dt, 12);
+    } else {
+      this.cameraController?.update(dt);
+      this.toolbar?.setFirstPersonMode(false);
+      this.toolbar?.setZoomPercent(this.cameraController?.getZoomPercent() ?? 100);
+      this.roadTool?.update(dt);
+      this.updateBuildButtonPosition();
+      this.sceneManager?.render(dt, this.cameraController?.getOrbitDistance());
+    }
     this.updateFps(time, dt);
     this.animationId = requestAnimationFrame(this.tick);
   };

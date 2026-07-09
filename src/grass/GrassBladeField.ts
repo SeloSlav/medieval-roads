@@ -19,6 +19,7 @@ import {
   GRASS_EDGE_FADE_BAND,
   GRASS_STREAM_CHUNK_RADIUS,
   GRASS_STREAM_CHUNKS_PER_FRAME,
+  GRASS_TUFT_SCATTER_ATTEMPTS,
   GRASS_TUFTS_PER_CHUNK,
   grassBladeRevealOpacity,
 } from './grassLodMath.ts';
@@ -42,11 +43,11 @@ export type GrassBladeField = {
 
 const ROAD_CLEAR_MARGIN = 1.05;
 const TAU = Math.PI * 2;
-const MAX_STREAM_INSTANCES = (GRASS_STREAM_CHUNK_RADIUS * 2 + 1) ** 2 * GRASS_TUFTS_PER_CHUNK;
-const SCATTER_ATTEMPTS = GRASS_TUFTS_PER_CHUNK + 14;
-const MIN_TUFT_SPACING_SQ = 0.72 * 0.72;
+const MAX_STREAM_INSTANCES = (GRASS_STREAM_CHUNK_RADIUS * 2 + 1) ** 2 * (GRASS_TUFTS_PER_CHUNK + 8);
+const MIN_TUFT_SPACING_SQ = 0.42 * 0.42;
+const MIN_MICRO_TUFT_SPACING_SQ = 0.26 * 0.26;
 
-/** Matches forest undergrowth — muted olive, not neon yellow-green. */
+/** Muted olive — aligned with forest undergrowth. */
 const BLADE_BASE = new THREE.Color(0x3a5032);
 const BLADE_MID = new THREE.Color(0x4a6340);
 const BLADE_TIP = new THREE.Color(0x566b48);
@@ -62,6 +63,7 @@ type GrassFieldContext = {
 type StreamChunk = {
   chunkX: number;
   chunkZ: number;
+  sortKey: number;
 };
 
 export function createGrassBladeField(
@@ -83,31 +85,42 @@ export function createGrassBladeField(
 
   const material = createGrassBladeMaterial();
   const geometry = createGrassTuftGeometry();
-  const mesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
-  mesh.name = 'Grass blade stream';
-  mesh.count = 0;
-  mesh.castShadow = false;
-  mesh.receiveShadow = true;
-  mesh.frustumCulled = true;
-  mesh.visible = false;
+
+  const createStreamMesh = (name: string): THREE.InstancedMesh => {
+    const streamMesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
+    streamMesh.name = name;
+    streamMesh.count = 0;
+    streamMesh.castShadow = false;
+    streamMesh.receiveShadow = true;
+    streamMesh.frustumCulled = false;
+    streamMesh.visible = false;
+    return streamMesh;
+  };
+
+  const meshPrimary = createStreamMesh('Grass blade stream A');
+  const meshSecondary = createStreamMesh('Grass blade stream B');
+  let activeMesh = meshPrimary;
+  let buildMesh = meshSecondary;
 
   const group = new THREE.Group();
   group.name = 'Grass blade field';
-  group.add(mesh);
+  group.add(meshPrimary, meshSecondary);
 
   let streamChunkX = Number.NaN;
   let streamChunkZ = Number.NaN;
-  let streamDirty = true;
+  let needsInitialStream = true;
+  let roadClearanceDirty = false;
   let rebuildQueue: StreamChunk[] | null = null;
-  let rebuildInstanceIndex = 0;
-  let rebuildFocusX = 0;
-  let rebuildFocusZ = 0;
+  let buildInstanceIndex = 0;
+  let buildFocusX = 0;
+  let buildFocusZ = 0;
   let lastMaterialOpacity = Number.NaN;
+  let grassZoomVisible = false;
 
   const collectStreamChunks = (focusX: number, focusZ: number): StreamChunk[] => {
     const centerChunkX = Math.floor(focusX / GRASS_BLADE_CHUNK_SIZE);
     const centerChunkZ = Math.floor(focusZ / GRASS_BLADE_CHUNK_SIZE);
-    const includeRadiusSq = (GRASS_BLADE_NEAR_RADIUS + GRASS_BLADE_CHUNK_SIZE * 0.6) ** 2;
+    const includeRadiusSq = (GRASS_BLADE_NEAR_RADIUS + GRASS_BLADE_CHUNK_SIZE * 0.55) ** 2;
     const chunks: StreamChunk[] = [];
 
     for (let dz = -GRASS_STREAM_CHUNK_RADIUS; dz <= GRASS_STREAM_CHUNK_RADIUS; dz++) {
@@ -118,71 +131,97 @@ export function createGrassBladeField(
         const chunkCenterZ = (chunkZ + 0.5) * GRASS_BLADE_CHUNK_SIZE;
         const toFocusX = chunkCenterX - focusX;
         const toFocusZ = chunkCenterZ - focusZ;
-        if (toFocusX * toFocusX + toFocusZ * toFocusZ > includeRadiusSq) continue;
-        chunks.push({ chunkX, chunkZ });
+        const distSq = toFocusX * toFocusX + toFocusZ * toFocusZ;
+        if (distSq > includeRadiusSq) continue;
+        chunks.push({ chunkX, chunkZ, sortKey: distSq });
       }
     }
 
+    chunks.sort((a, b) => a.sortKey - b.sortKey);
     return chunks;
   };
 
-  const beginStreamRebuild = (focusX: number, focusZ: number): void => {
+  const startBackgroundRebuild = (focusX: number, focusZ: number): void => {
     rebuildQueue = collectStreamChunks(focusX, focusZ);
-    rebuildInstanceIndex = 0;
-    rebuildFocusX = focusX;
-    rebuildFocusZ = focusZ;
-    mesh.count = 0;
+    buildInstanceIndex = 0;
+    buildFocusX = focusX;
+    buildFocusZ = focusZ;
+    buildMesh.count = 0;
+    needsInitialStream = false;
+    roadClearanceDirty = false;
   };
 
-  const finishStreamRebuild = (focusX: number, focusZ: number): void => {
-    streamChunkX = Math.floor(focusX / GRASS_BLADE_CHUNK_SIZE);
-    streamChunkZ = Math.floor(focusZ / GRASS_BLADE_CHUNK_SIZE);
-    streamDirty = false;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
+  const swapActiveMesh = (): void => {
+    activeMesh.visible = false;
+    buildMesh.computeBoundingSphere();
+    buildMesh.visible = grassZoomVisible;
+    activeMesh = buildMesh;
+    buildMesh = activeMesh === meshPrimary ? meshSecondary : meshPrimary;
+    streamChunkX = Math.floor(buildFocusX / GRASS_BLADE_CHUNK_SIZE);
+    streamChunkZ = Math.floor(buildFocusZ / GRASS_BLADE_CHUNK_SIZE);
   };
 
-  const stepStreamRebuild = (): void => {
+  const stepBackgroundRebuild = (): void => {
     if (!rebuildQueue) return;
 
-    const budget = GRASS_STREAM_CHUNKS_PER_FRAME;
-    const end = Math.min(rebuildQueue.length, budget);
+    const end = Math.min(GRASS_STREAM_CHUNKS_PER_FRAME, rebuildQueue.length);
     for (let index = 0; index < end; index++) {
       const { chunkX, chunkZ } = rebuildQueue[index]!;
-      rebuildInstanceIndex = writeChunkInstances(
-        mesh,
-        rebuildInstanceIndex,
+      buildInstanceIndex = writeChunkInstances(
+        buildMesh,
+        buildInstanceIndex,
         chunkX,
         chunkZ,
-        rebuildFocusX,
-        rebuildFocusZ,
+        buildFocusX,
+        buildFocusZ,
         context,
       );
     }
 
     rebuildQueue.splice(0, end);
-    mesh.count = rebuildInstanceIndex;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    buildMesh.count = buildInstanceIndex;
+    buildMesh.instanceMatrix.needsUpdate = true;
+    if (buildMesh.instanceColor) buildMesh.instanceColor.needsUpdate = true;
+
+    if (activeMesh.count === 0) {
+      buildMesh.visible = grassZoomVisible;
+      activeMesh.visible = false;
+    }
 
     if (rebuildQueue.length === 0) {
       rebuildQueue = null;
-      finishStreamRebuild(rebuildFocusX, rebuildFocusZ);
+      swapActiveMesh();
     }
+  };
+
+  const syncStreamVisibility = (): void => {
+    if (!grassZoomVisible) {
+      activeMesh.visible = false;
+      buildMesh.visible = false;
+      return;
+    }
+
+    if (rebuildQueue && activeMesh.count > 0) {
+      activeMesh.visible = true;
+      buildMesh.visible = false;
+      return;
+    }
+
+    activeMesh.visible = activeMesh.count > 0;
+    buildMesh.visible = false;
   };
 
   return {
     group,
     syncRoadClearance(network: RoadNetwork) {
       context.roadEdges = [...network.edges.values()];
-      streamDirty = true;
+      roadClearanceDirty = true;
     },
     updateCameraState(_cameraPosition: THREE.Vector3, cameraTarget: THREE.Vector3, cameraDistance: number) {
       const zoomOpacity = grassBladeRevealOpacity(cameraDistance);
-      const zoomVisible = zoomOpacity > 0.02;
+      grassZoomVisible = zoomOpacity > 0.02;
 
-      if (Math.abs(zoomOpacity - lastMaterialOpacity) > 0.008) {
+      if (!Number.isFinite(lastMaterialOpacity) || Math.abs(zoomOpacity - lastMaterialOpacity) > 0.008) {
         lastMaterialOpacity = zoomOpacity;
         material.opacity = zoomOpacity;
         const useTransparency = zoomOpacity < 0.995;
@@ -193,9 +232,9 @@ export function createGrassBladeField(
         }
       }
 
-      mesh.visible = zoomVisible;
-      if (!zoomVisible) {
+      if (!grassZoomVisible) {
         rebuildQueue = null;
+        syncStreamVisibility();
         return;
       }
 
@@ -205,20 +244,27 @@ export function createGrassBladeField(
       const centerChunkZ = Math.floor(focusZ / GRASS_BLADE_CHUNK_SIZE);
 
       if (rebuildQueue) {
-        const queueChunkX = Math.floor(rebuildFocusX / GRASS_BLADE_CHUNK_SIZE);
-        const queueChunkZ = Math.floor(rebuildFocusZ / GRASS_BLADE_CHUNK_SIZE);
-        if (streamDirty || centerChunkX !== queueChunkX || centerChunkZ !== queueChunkZ) {
-          beginStreamRebuild(focusX, focusZ);
+        const queueChunkX = Math.floor(buildFocusX / GRASS_BLADE_CHUNK_SIZE);
+        const queueChunkZ = Math.floor(buildFocusZ / GRASS_BLADE_CHUNK_SIZE);
+        if (
+          roadClearanceDirty ||
+          centerChunkX !== queueChunkX ||
+          centerChunkZ !== queueChunkZ
+        ) {
+          startBackgroundRebuild(focusX, focusZ);
         }
-        stepStreamRebuild();
+        stepBackgroundRebuild();
+        syncStreamVisibility();
         return;
       }
 
       const chunkChanged = centerChunkX !== streamChunkX || centerChunkZ !== streamChunkZ;
-      if (streamDirty || chunkChanged) {
-        beginStreamRebuild(focusX, focusZ);
-        stepStreamRebuild();
+      if (needsInitialStream || roadClearanceDirty || chunkChanged) {
+        startBackgroundRebuild(focusX, focusZ);
+        stepBackgroundRebuild();
       }
+
+      syncStreamVisibility();
     },
     dispose() {
       geometry.dispose();
@@ -247,7 +293,7 @@ const writeMatrix = new THREE.Matrix4();
 const writeQuaternion = new THREE.Quaternion();
 const writePosition = new THREE.Vector3();
 const writeScale = new THREE.Vector3();
-const writeEuler = new THREE.Euler();
+const writeEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const writeColor = new THREE.Color();
 
 function writeChunkInstances(
@@ -264,19 +310,30 @@ function writeChunkInstances(
   const chunkMinX = chunkX * GRASS_BLADE_CHUNK_SIZE;
   const chunkMinZ = chunkZ * GRASS_BLADE_CHUNK_SIZE;
   const chunkSpan = GRASS_BLADE_CHUNK_SIZE;
-  const margin = chunkSpan * 0.08;
+  const margin = chunkSpan * 0.06;
   let instanceIndex = startIndex;
+  const heightCache = new Map<number, number>();
 
-  const localPlacements: { x: number; z: number }[] = [];
-  const tuftTarget = GRASS_TUFTS_PER_CHUNK + Math.floor(rng() * 5);
+  const heightAt = (x: number, z: number): number => {
+    const key = (Math.round(x * 8) & 0xffff) | ((Math.round(z * 8) & 0xffff) << 16);
+    const cached = heightCache.get(key);
+    if (cached !== undefined) return cached;
+    const sample = terrain.getHeightAt(x, z);
+    heightCache.set(key, sample);
+    return sample;
+  };
 
-  for (let attempt = 0; attempt < SCATTER_ATTEMPTS && localPlacements.length < tuftTarget; attempt++) {
+  const localPlacements: { x: number; z: number; micro: boolean }[] = [];
+  const tuftTarget = GRASS_TUFTS_PER_CHUNK + Math.floor(rng() * 9);
+
+  for (let attempt = 0; attempt < GRASS_TUFT_SCATTER_ATTEMPTS && localPlacements.length < tuftTarget; attempt++) {
+    const micro = rng() < 0.42 && localPlacements.length > 2;
     let x: number;
     let z: number;
 
-    if (localPlacements.length > 0 && rng() < 0.28) {
+    if (localPlacements.length > 0 && rng() < 0.42) {
       const anchor = localPlacements[Math.floor(rng() * localPlacements.length)]!;
-      const clusterRadius = 0.55 + rng() * 0.95;
+      const clusterRadius = micro ? 0.22 + rng() * 0.55 : 0.45 + rng() * 1.15;
       const angle = rng() * TAU;
       x = anchor.x + Math.cos(angle) * clusterRadius;
       z = anchor.z + Math.sin(angle) * clusterRadius;
@@ -285,11 +342,12 @@ function writeChunkInstances(
       z = chunkMinZ + margin + rng() * (chunkSpan - margin * 2);
     }
 
+    const spacingSq = micro ? MIN_MICRO_TUFT_SPACING_SQ : MIN_TUFT_SPACING_SQ;
     let tooClose = false;
     for (const placed of localPlacements) {
       const dx = x - placed.x;
       const dz = z - placed.z;
-      if (dx * dx + dz * dz < MIN_TUFT_SPACING_SQ) {
+      if (dx * dx + dz * dz < spacingSq) {
         tooClose = true;
         break;
       }
@@ -300,35 +358,36 @@ function writeChunkInstances(
     if (isBlockedAt?.(x, z)) continue;
     if (isGrassNearAnyEdge(x, z, roadEdges)) continue;
 
-    const toFocusX = x - focusX;
-    const toFocusZ = z - focusZ;
-    const focusDist = Math.hypot(toFocusX, toFocusZ);
-    const edgeFade = smoothstep01(
-      GRASS_BLADE_NEAR_RADIUS,
-      GRASS_BLADE_NEAR_RADIUS - GRASS_EDGE_FADE_BAND,
-      focusDist,
-    );
+    const focusDist = Math.hypot(x - focusX, z - focusZ);
+    const edgeFade = edgeFadeFromFocusDistance(focusDist);
     if (edgeFade <= 0.02) continue;
 
-    localPlacements.push({ x, z });
+    localPlacements.push({ x, z, micro });
 
     const density = forestDensityAt(x, z, forestCores, extent);
+    const sizeRoll = Math.pow(rng(), micro ? 1.1 : 0.72);
     const scale =
-      THREE.MathUtils.lerp(0.82, 1.22, Math.pow(rng(), 0.82)) *
+      THREE.MathUtils.lerp(micro ? 0.58 : 0.88, micro ? 0.92 : 1.32, sizeRoll) *
       THREE.MathUtils.lerp(0.9, 1.06, density) *
       edgeFade;
-    const yaw = rng() * TAU;
 
-    writePosition.set(x, terrain.getHeightAt(x, z), z);
-    writeEuler.set(0, yaw, 0);
-    writeQuaternion.setFromEuler(writeEuler);
-    writeScale.set(scale, scale, scale);
-    writeMatrix.compose(writePosition, writeQuaternion, writeScale);
+    composeTuftMatrix(
+      x,
+      z,
+      scale,
+      rng,
+      heightAt,
+      writeMatrix,
+      writeQuaternion,
+      writePosition,
+      writeScale,
+      writeEuler,
+    );
     mesh.setMatrixAt(instanceIndex, writeMatrix);
     writeColor.setHSL(
       0.27 + (rng() - 0.5) * 0.035,
-      0.36 + rng() * 0.12,
-      0.27 + rng() * 0.08,
+      0.38 + rng() * 0.1,
+      0.3 + rng() * 0.08,
     );
     mesh.setColorAt(instanceIndex, writeColor);
     instanceIndex++;
@@ -337,9 +396,41 @@ function writeChunkInstances(
   return instanceIndex;
 }
 
-function smoothstep01(edge0: number, edge1: number, value: number): number {
-  const t = THREE.MathUtils.clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
+function composeTuftMatrix(
+  x: number,
+  z: number,
+  scale: number,
+  rng: () => number,
+  heightAt: (x: number, z: number) => number,
+  matrix: THREE.Matrix4,
+  quaternion: THREE.Quaternion,
+  position: THREE.Vector3,
+  scaleVector: THREE.Vector3,
+  euler: THREE.Euler,
+): void {
+  const yaw = rng() * TAU;
+  const leanDir = rng() * TAU;
+  const leanAmount = THREE.MathUtils.lerp(0.14, 0.42, Math.pow(rng(), 0.65));
+  const tiltX = Math.cos(leanDir) * leanAmount;
+  const tiltZ = Math.sin(leanDir) * leanAmount * 0.75;
+  const roll = (rng() - 0.5) * 0.22;
+
+  position.set(x, heightAt(x, z), z);
+  euler.set(tiltX, yaw, tiltZ + roll);
+  quaternion.setFromEuler(euler);
+  const widthScale = scale * THREE.MathUtils.lerp(0.92, 1.14, rng());
+  const heightScale = scale * THREE.MathUtils.lerp(0.96, 1.18, rng());
+  scaleVector.set(widthScale, heightScale, widthScale);
+  matrix.compose(position, quaternion, scaleVector);
+}
+
+/** 1 near focus, 0 at outer radius. */
+function edgeFadeFromFocusDistance(focusDist: number): number {
+  const inner = GRASS_BLADE_NEAR_RADIUS - GRASS_EDGE_FADE_BAND;
+  const outer = GRASS_BLADE_NEAR_RADIUS;
+  const t = THREE.MathUtils.clamp((focusDist - inner) / (outer - inner), 0, 1);
+  const smooth = t * t * (3 - 2 * t);
+  return 1 - smooth;
 }
 
 function createGrassBladeMaterial(): MeshStandardNodeMaterial {
@@ -347,12 +438,12 @@ function createGrassBladeMaterial(): MeshStandardNodeMaterial {
   material.name = 'Grass blade';
   material.side = THREE.DoubleSide;
   material.transparent = true;
-  material.opacity = 0;
-  material.alphaTest = 0.22;
+  material.opacity = 1;
+  material.alphaTest = 0.15;
   material.depthWrite = true;
-  material.roughness = 0.94;
+  material.roughness = 0.92;
   material.metalness = 0;
-  material.color.set(0x8a9480);
+  material.color.set(0xffffff);
   material.colorNode = (vertexColor() as TslNode).rgb;
   return material;
 }
@@ -368,7 +459,6 @@ function isGrassNearAnyEdge(x: number, z: number, edges: RoadEdge[]): boolean {
   return false;
 }
 
-/** Thin tapered blades in a loose tuft — reads as individual stalks, not flat cards. */
 function createGrassTuftGeometry(): THREE.BufferGeometry {
   const positions: number[] = [];
   const normals: number[] = [];
@@ -377,10 +467,11 @@ function createGrassTuftGeometry(): THREE.BufferGeometry {
 
   const bladeCount = GRASS_BLADES_PER_TUFT;
   for (let i = 0; i < bladeCount; i++) {
-    const yaw = (i / bladeCount) * TAU + (i % 2 === 0 ? 0.16 : -0.12);
-    const height = 0.46 + (i % 4) * 0.095 + (i % 3) * 0.05;
-    const halfWidth = 0.019 + (i % 2) * 0.006;
-    const lean = 0.04 + (i % 3) * 0.02;
+    const spread = (i / bladeCount) * TAU + (rngHash(i) - 0.5) * 0.55;
+    const yaw = spread + (i % 2 === 0 ? 0.2 : -0.16);
+    const height = 0.48 + (i % 4) * 0.1 + (i % 3) * 0.055;
+    const halfWidth = 0.02 + (i % 2) * 0.007;
+    const lean = 0.06 + (i % 3) * 0.035 + (i % 2) * 0.02;
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);
     const leanX = cos * lean;
@@ -409,6 +500,11 @@ function createGrassTuftGeometry(): THREE.BufferGeometry {
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+function rngHash(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 function appendTaperedBlade(

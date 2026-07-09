@@ -53,6 +53,41 @@ button {
   outline: none;
 }
 
+.fps-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.fps-crosshair::before,
+.fps-crosshair::after {
+  content: '';
+  position: absolute;
+  background: rgba(238, 232, 220, 0.82);
+  border-radius: 1px;
+}
+
+.fps-crosshair::before {
+  left: 50%;
+  top: 2px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+}
+
+.fps-crosshair::after {
+  top: 50%;
+  left: 2px;
+  width: 10px;
+  height: 2px;
+  margin-top: -1px;
+}
+
 .hud-right-stack {
   position: absolute;
   top: 14px;

@@ -154,6 +154,10 @@ export class BuildToolbar {
     this.zoomValue.textContent = `${displayZoom}%`;
   }
 
+  setFirstPersonMode(active: boolean): void {
+    if (active) this.zoomValue.textContent = 'Walk';
+  }
+
   showDeletePopup(options: DeletePopupOptions): void {
     this.deleteCancel = options.onCancel;
     this.deleteRemove = options.onRemove;

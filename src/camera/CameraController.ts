@@ -55,6 +55,7 @@ export class CameraController {
   private readonly lookAtPoint = new THREE.Vector3();
   private readonly forward = new THREE.Vector3();
   private readonly keys = new Set<string>();
+  private inputEnabled = true;
   private isPanning = false;
   private isRotating = false;
   private lastMouseX = 0;
@@ -82,7 +83,37 @@ export class CameraController {
     return this.currentDistance;
   }
 
+  getYaw(): number {
+    return this.currentYaw;
+  }
+
+  getTargetPosition(out = new THREE.Vector3()): THREE.Vector3 {
+    return out.copy(this.config.target);
+  }
+
+  setInputEnabled(enabled: boolean): void {
+    this.inputEnabled = enabled;
+    if (enabled) return;
+    this.isPanning = false;
+    this.isRotating = false;
+    this.keys.clear();
+  }
+
+  syncFromFirstPerson(x: number, z: number, yaw: number): void {
+    const terrainY = this.config.getHeightAt(x, z);
+    this.desiredTarget.set(x, terrainY, z);
+    this.config.target.copy(this.desiredTarget);
+    this.currentYaw = this.normalizeAngle(yaw);
+    this.targetYaw = this.currentYaw;
+    this.currentPitch = DEFAULT_PITCH;
+    this.targetPitch = DEFAULT_PITCH;
+    this.targetDistance = THREE.MathUtils.clamp(24, this.getMinDistance(), MAX_DISTANCE);
+    this.currentDistance = this.targetDistance;
+    this.updateCamera();
+  }
+
   update(dt: number): void {
+    if (!this.inputEnabled) return;
     const scale = this.getPanScale();
     const panSpeed = KEY_PAN_SPEED * scale * dt;
     if (this.keys.has('w') || this.keys.has('arrowup')) this.pan(0, panSpeed);
@@ -118,6 +149,7 @@ export class CameraController {
   }
 
   private readonly onMouseDown = (event: MouseEvent): void => {
+    if (!this.inputEnabled) return;
     if (!this.config.domElement.contains(event.target as Node)) return;
     if (this.config.shouldIgnoreInput?.(event)) return;
     if (event.button === 2) {
@@ -165,6 +197,7 @@ export class CameraController {
   };
 
   private readonly onWheel = (event: WheelEvent): void => {
+    if (!this.inputEnabled) return;
     if (this.config.shouldIgnoreInput?.(event)) return;
     event.preventDefault();
     if (event.deltaY !== 0) {
@@ -176,6 +209,7 @@ export class CameraController {
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (!this.inputEnabled) return;
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return;
