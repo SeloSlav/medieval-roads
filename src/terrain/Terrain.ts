@@ -55,6 +55,10 @@ export class Terrain {
     return new THREE.Vector3(x, this.getHeightAt(x, z) + offset, z);
   }
 
+  getPointAtInto(x: number, z: number, target: THREE.Vector3, offset = 0): THREE.Vector3 {
+    return target.set(x, this.getHeightAt(x, z) + offset, z);
+  }
+
   clampXZ(x: number, z: number): { x: number; z: number } {
     return {
       x: THREE.MathUtils.clamp(x, this.bounds.minX, this.bounds.maxX),

@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
 import type { BuildingState, BurgageZoneState } from '../resources/types.ts';
-import { distancePointToPolylineXZ } from '../utils/pathGeometry.ts';
 import { residenceZoneCost } from '../resources/buildingEconomy.ts';
 import {
   type BurgageFrontageEdge,
@@ -20,7 +19,9 @@ import {
   suggestPlotCount,
 } from './burgageLayout.ts';
 import { convexPolygonsOverlap2, isConvexQuad2, polygonArea2 } from '../utils/polygonGeometry.ts';
-import { burgageZoneOverlapsBuildings } from '../placement/placementConflicts.ts';
+import { burgageZoneOverlapsBuildings, overlapsExistingZoneIndexed } from '../placement/placementConflicts.ts';
+import { getPlacementSpatialIndex } from '../placement/placementSpatialIndex.ts';
+import type { GameState } from '../resources/types.ts';
 
 export type BurgagePlacementFailureReason =
   | 'water'
@@ -53,14 +54,25 @@ type BurgagePlacementContext = {
   isWaterAt: (x: number, z: number) => boolean;
   isQuarryPitAt?: (x: number, z: number) => boolean;
   getNaturalHeightAt: (x: number, z: number) => number;
+  /** When preview already solved layout, skip a second resolve pass. */
+  precomputedLayout?: BurgageLayoutResult | null;
+  /** Cached placement index for overlap queries. */
+  gameState?: GameState;
 };
 
 function zonePolygon(zone: BurgageZoneState) {
   return [zone.cornerA, zone.cornerB, zone.cornerC, zone.cornerD];
 }
 
-function overlapsExistingZone(zoneCorners: BurgageZoneCorners, existingZones: Iterable<BurgageZoneState>): boolean {
+function overlapsExistingZone(
+  zoneCorners: BurgageZoneCorners,
+  existingZones: Iterable<BurgageZoneState>,
+  gameState?: GameState,
+): boolean {
   const candidate = cornersToArray(zoneCorners);
+  if (gameState) {
+    return overlapsExistingZoneIndexed(candidate, getPlacementSpatialIndex(gameState));
+  }
   for (const zone of existingZones) {
     if (convexPolygonsOverlap2(candidate, zonePolygon(zone))) {
       return true;
@@ -107,13 +119,13 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
     return { ok: false, reason: 'too_deep' };
   }
 
-  const roadDistance = (edge: BurgageFrontageEdge) =>
-    edgeDistanceToRoads(zoneCorners, edge, context.roadNetwork);
-  if (roadDistance(context.frontageEdge) > MAX_ROAD_FRONTAGE_DISTANCE) {
+  const edgeDistances = frontageEdgeRoadDistances(zoneCorners, context.roadNetwork);
+  if (edgeDistances[context.frontageEdge] > MAX_ROAD_FRONTAGE_DISTANCE) {
     return { ok: false, reason: 'no_road_frontage' };
   }
 
-  const layout = resolveBurgageLayout(zoneCorners, context.frontageEdge, context.plotCount);
+  const layout = context.precomputedLayout
+    ?? resolveBurgageLayout(zoneCorners, context.frontageEdge, context.plotCount);
   if (!layout || layout.residences.length === 0) {
     if (zoneDepth < MIN_ZONE_DEPTH) {
       return { ok: false, reason: 'too_small' };
@@ -121,11 +133,11 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
     return { ok: false, reason: 'no_fit' };
   }
 
-  if (overlapsExistingZone(zoneCorners, context.existingZones)) {
+  if (overlapsExistingZone(zoneCorners, context.existingZones, context.gameState)) {
     return { ok: false, reason: 'overlaps_existing' };
   }
 
-  if (burgageZoneOverlapsBuildings(zoneCorners, context.existingBuildings)) {
+  if (burgageZoneOverlapsBuildings(zoneCorners, context.existingBuildings, context.gameState)) {
     return { ok: false, reason: 'overlaps_building' };
   }
 
@@ -137,25 +149,50 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
   return { ok: true, layout };
 }
 
+export function frontageEdgeRoadDistances(
+  corners: BurgageZoneCorners,
+  roadNetwork: RoadNetwork,
+): [number, number, number, number] {
+  return [
+    edgeDistanceToRoads(corners, 0, roadNetwork),
+    edgeDistanceToRoads(corners, 1, roadNetwork),
+    edgeDistanceToRoads(corners, 2, roadNetwork),
+    edgeDistanceToRoads(corners, 3, roadNetwork),
+  ];
+}
+
+export function countValidFrontageEdges(
+  corners: BurgageZoneCorners,
+  roadNetwork: RoadNetwork,
+): number {
+  const distances = frontageEdgeRoadDistances(corners, roadNetwork);
+  let count = 0;
+  for (const distance of distances) {
+    if (distance <= MAX_ROAD_FRONTAGE_DISTANCE) count += 1;
+  }
+  return count;
+}
+
 export function detectFrontageEdge(corners: BurgageZoneCorners, roadNetwork: RoadNetwork): BurgageFrontageEdge {
   const valid = validFrontageEdges(corners, roadNetwork);
-  return valid[0] ?? autoFrontageEdge(corners, (edge) => edgeDistanceToRoads(corners, edge, roadNetwork));
+  if (valid.length > 0) return valid[0];
+  const distances = frontageEdgeRoadDistances(corners, roadNetwork);
+  return autoFrontageEdge(corners, (edge) => distances[edge]);
 }
 
 export function validFrontageEdges(
   corners: BurgageZoneCorners,
   roadNetwork: RoadNetwork,
 ): BurgageFrontageEdge[] {
-  const edges: BurgageFrontageEdge[] = [];
+  const distances = frontageEdgeRoadDistances(corners, roadNetwork);
+  const valid: BurgageFrontageEdge[] = [];
   for (let edge = 0; edge < 4; edge++) {
-    const frontageEdge = edge as BurgageFrontageEdge;
-    if (edgeDistanceToRoads(corners, frontageEdge, roadNetwork) <= MAX_ROAD_FRONTAGE_DISTANCE) {
-      edges.push(frontageEdge);
+    if (distances[edge] <= MAX_ROAD_FRONTAGE_DISTANCE) {
+      valid.push(edge as BurgageFrontageEdge);
     }
   }
-  return edges.sort(
-    (a, b) => edgeDistanceToRoads(corners, a, roadNetwork) - edgeDistanceToRoads(corners, b, roadNetwork),
-  );
+  valid.sort((a, b) => distances[a] - distances[b]);
+  return valid;
 }
 
 export function cycleFrontageEdge(
@@ -186,18 +223,17 @@ function edgeDistanceToRoads(
   roadNetwork: RoadNetwork,
 ): number {
   const [start, end] = getZoneEdge(corners, edge);
-  const paths = [...roadNetwork.edges.values()].map((edgeRow) => edgeRow.sampledPath);
-  if (paths.length === 0) return Infinity;
+  if (roadNetwork.edges.size === 0 && roadNetwork.nodes.size === 0) return Infinity;
 
+  const index = roadNetwork.getSpatialIndex();
   let minDistance = Infinity;
   const samples = 10;
+  const searchRadius = MAX_ROAD_FRONTAGE_DISTANCE + 4;
   for (let i = 0; i <= samples; i++) {
     const t = i / samples;
     const x = start.x + (end.x - start.x) * t;
     const z = start.z + (end.z - start.z) * t;
-    for (const path of paths) {
-      minDistance = Math.min(minDistance, distancePointToPolylineXZ(x, z, path));
-    }
+    minDistance = Math.min(minDistance, index.nearestDistance(x, z, searchRadius));
   }
   return minDistance;
 }

@@ -2,6 +2,7 @@ import { getBuildingPadParams } from '../buildings/BuildingTerrainLayout.ts';
 import { buildingPlacementYaw } from '../buildings/buildingPlacement.ts';
 import { MAIN_HOUSE_DEPTH, MAIN_HOUSE_WIDTH } from '../residences/burgageLayout.ts';
 import type { GameState } from '../resources/types.ts';
+import type { PathBoundsXZ } from '../utils/pathGeometry.ts';
 import {
   type Point2,
   cross2,
@@ -16,6 +17,7 @@ import {
 } from '../utils/polygonGeometry.ts';
 
 const BUILDING_CLEARANCE_MARGIN = 0.85;
+const OBSTACLE_CELL_SIZE = 36;
 
 export type RoadFootprintObstacle = {
   corners: Point2[];
@@ -26,11 +28,19 @@ export function collectRoadFootprintObstacles(
   roadHalfWidth: number,
 ): RoadFootprintObstacle[] {
   if (!state) return [];
+  return collectRoadFootprintObstaclesInBounds(state, roadHalfWidth, unboundedBounds());
+}
 
+export function collectRoadFootprintObstaclesInBounds(
+  state: GameState,
+  roadHalfWidth: number,
+  bounds: PathBoundsXZ,
+): RoadFootprintObstacle[] {
   const pad = roadHalfWidth + BUILDING_CLEARANCE_MARGIN;
   const obstacles: RoadFootprintObstacle[] = [];
 
   for (const building of state.buildings.values()) {
+    if (!pointInBounds(building.x, building.z, bounds)) continue;
     const params = getBuildingPadParams(building.kind);
     obstacles.push({
       corners: orientedRectCorners2(
@@ -43,6 +53,7 @@ export function collectRoadFootprintObstacles(
   }
 
   for (const residence of state.residences.values()) {
+    if (!pointInBounds(residence.x, residence.z, bounds)) continue;
     obstacles.push({
       corners: orientedRectCorners2(
         { x: residence.x, z: residence.z },
@@ -54,6 +65,61 @@ export function collectRoadFootprintObstacles(
   }
 
   return obstacles;
+}
+
+function unboundedBounds(): PathBoundsXZ {
+  return { minX: -Infinity, maxX: Infinity, minZ: -Infinity, maxZ: Infinity };
+}
+
+function pointInBounds(x: number, z: number, bounds: PathBoundsXZ): boolean {
+  return x >= bounds.minX && x <= bounds.maxX && z >= bounds.minZ && z <= bounds.maxZ;
+}
+
+export class RoadFootprintObstacleIndex {
+  private readonly cells = new Map<number, RoadFootprintObstacle[]>();
+
+  constructor(obstacles: readonly RoadFootprintObstacle[]) {
+    for (const obstacle of obstacles) {
+      const bounds = polygonBounds(obstacle.corners);
+      const minCellX = Math.floor(bounds.minX / OBSTACLE_CELL_SIZE);
+      const maxCellX = Math.floor(bounds.maxX / OBSTACLE_CELL_SIZE);
+      const minCellZ = Math.floor(bounds.minZ / OBSTACLE_CELL_SIZE);
+      const maxCellZ = Math.floor(bounds.maxZ / OBSTACLE_CELL_SIZE);
+      for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+          const key = packObstacleCell(cellX, cellZ);
+          const bucket = this.cells.get(key);
+          if (bucket) bucket.push(obstacle);
+          else this.cells.set(key, [obstacle]);
+        }
+      }
+    }
+  }
+
+  querySegment(start: Point2, end: Point2, padding: number): RoadFootprintObstacle[] {
+    const minX = Math.min(start.x, end.x) - padding;
+    const maxX = Math.max(start.x, end.x) + padding;
+    const minZ = Math.min(start.z, end.z) - padding;
+    const maxZ = Math.max(start.z, end.z) + padding;
+    const minCellX = Math.floor(minX / OBSTACLE_CELL_SIZE);
+    const maxCellX = Math.floor(maxX / OBSTACLE_CELL_SIZE);
+    const minCellZ = Math.floor(minZ / OBSTACLE_CELL_SIZE);
+    const maxCellZ = Math.floor(maxZ / OBSTACLE_CELL_SIZE);
+    const seen = new Set<RoadFootprintObstacle>();
+    const results: RoadFootprintObstacle[] = [];
+    for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+      for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+        const bucket = this.cells.get(packObstacleCell(cellX, cellZ));
+        if (!bucket) continue;
+        for (const obstacle of bucket) {
+          if (seen.has(obstacle)) continue;
+          seen.add(obstacle);
+          results.push(obstacle);
+        }
+      }
+    }
+    return results;
+  }
 }
 
 export function computeAutoSegmentCurve(
@@ -163,4 +229,22 @@ function segmentProjectionT(point: Point2, start: Point2, end: Point2): number {
   const lengthSq = abx * abx + abz * abz;
   if (lengthSq <= 1e-6) return 0;
   return ((point.x - start.x) * abx + (point.z - start.z) * abz) / lengthSq;
+}
+
+function polygonBounds(corners: Point2[]): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const corner of corners) {
+    if (corner.x < minX) minX = corner.x;
+    if (corner.x > maxX) maxX = corner.x;
+    if (corner.z < minZ) minZ = corner.z;
+    if (corner.z > maxZ) maxZ = corner.z;
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
+function packObstacleCell(cellX: number, cellZ: number): number {
+  return ((cellX + 32768) & 0xffff) | (((cellZ + 32768) & 0xffff) << 16);
 }

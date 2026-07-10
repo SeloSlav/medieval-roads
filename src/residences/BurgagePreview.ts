@@ -153,7 +153,8 @@ export class BurgagePreview {
   private readonly cornerMarkers: THREE.InstancedMesh;
   private readonly hoverMarker: THREE.Mesh;
   private readonly housePreviewMeshes: THREE.Group[];
-  private lastSignature = '';
+  private lastGeometrySignature = '';
+  private lastValid: boolean | null = null;
   private readonly cornerMatrix = new THREE.Matrix4();
 
   constructor() {
@@ -305,10 +306,50 @@ export class BurgagePreview {
     }
 
     const hoverSignature = hoverPoint ? `${hoverPoint.x.toFixed(2)},${hoverPoint.z.toFixed(2)}` : 'none';
-    const signature = `${cornersSignature(corners)}|${hoverSignature}|${valid ? 1 : 0}|${layoutSignature(layout)}|${placing ? 1 : 0}|${placementStage}|${frontageEdge}`;
-    if (signature === this.lastSignature) return;
-    this.lastSignature = signature;
+    const geometrySignature = `${cornersSignature(corners)}|${hoverSignature}|${layoutSignature(layout)}|${placing ? 1 : 0}|${placementStage}|${frontageEdge}`;
+    const geometryChanged = geometrySignature !== this.lastGeometrySignature;
+    const validityChanged = valid !== this.lastValid;
 
+    if (!geometryChanged && !validityChanged) return;
+
+    if (geometryChanged) {
+      this.lastGeometrySignature = geometrySignature;
+      this.rebuildGeometry(
+        corners,
+        layout,
+        valid,
+        getHeightAt,
+        placing,
+        placementStage,
+        hoverPoint,
+      );
+      this.lastValid = valid;
+      return;
+    }
+
+    this.setValidity(valid);
+  }
+
+  setValidity(valid: boolean): void {
+    if (valid === this.lastValid) return;
+    this.lastValid = valid;
+    const edgeColor = valid ? VALID_ZONE_COLOR : INVALID_ZONE_COLOR;
+    const fillColor = valid ? VALID_ZONE_FILL : INVALID_ZONE_FILL;
+    (this.zoneFill.material as THREE.MeshBasicMaterial).color.setHex(fillColor);
+    if (this.zoneOutline.material === this.zoneOutlineSolid) {
+      this.zoneOutlineSolid.color.setHex(edgeColor);
+    }
+  }
+
+  private rebuildGeometry(
+    corners: THREE.Vector3[],
+    layout: BurgageLayoutResult | null,
+    valid: boolean,
+    getHeightAt: (x: number, z: number) => number,
+    placing: boolean,
+    placementStage: number,
+    hoverPoint: THREE.Vector3 | null,
+  ): void {
     this.group.visible = true;
     const edgeColor = valid ? VALID_ZONE_COLOR : INVALID_ZONE_COLOR;
     const fillColor = valid ? VALID_ZONE_FILL : INVALID_ZONE_FILL;
@@ -417,7 +458,8 @@ export class BurgagePreview {
   }
 
   clear(): void {
-    this.lastSignature = '';
+    this.lastGeometrySignature = '';
+    this.lastValid = null;
     this.group.visible = false;
     this.cornerMarkers.count = 0;
     this.cornerMarkers.visible = false;

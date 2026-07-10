@@ -12,18 +12,7 @@ type RoadGraph = {
 };
 
 export function nearestRoadDistance(x: number, z: number, network: RoadNetwork): number {
-  let best = Infinity;
-
-  for (const node of network.nodes.values()) {
-    best = Math.min(best, Math.hypot(x - node.position.x, z - node.position.z));
-  }
-
-  for (const edge of network.edges.values()) {
-    if (edge.sampledPath.length < 2) continue;
-    best = Math.min(best, distancePointToPolylineXZ(x, z, edge.sampledPath));
-  }
-
-  return best;
+  return network.nearestPointDistance(x, z);
 }
 
 export function hasRoadAccess(

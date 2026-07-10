@@ -1,5 +1,4 @@
 ﻿import * as THREE from 'three';
-import { disposeObject3D } from '../utils/dispose.ts';
 import { RoadMaterialFactory } from './RoadMaterialFactory.ts';
 import { RoadMeshBuilder } from './RoadMeshBuilder.ts';
 
@@ -20,7 +19,7 @@ export class RoadPreview {
   private readonly meshBuilder: RoadMeshBuilder;
   private readonly materials: RoadMaterialFactory;
   readonly group = new THREE.Group();
-  private previewRibbon: THREE.Group | null = null;
+  private previewCoreMesh: THREE.Mesh | null = null;
   private readonly marker: THREE.Mesh;
   private readonly anchorMarkers: THREE.InstancedMesh;
   private readonly anchorMaterialValid: THREE.MeshBasicMaterial;
@@ -56,7 +55,7 @@ export class RoadPreview {
   }
 
   update(
-    points: THREE.Vector3[],
+    _points: THREE.Vector3[],
     valid: boolean,
     width: number,
     snapPoint: THREE.Vector3 | null,
@@ -76,11 +75,14 @@ export class RoadPreview {
 
     if (geometryChanged) {
       this.lastGeometrySignature = signature;
-      this.clearRibbon();
-      const ribbon = this.meshBuilder.buildPreview(points, width, valid, sampledPath);
-      if (ribbon) {
-        this.previewRibbon = ribbon;
-        this.group.add(ribbon);
+      const mesh = this.meshBuilder.buildPreviewFast(sampledPath, width, valid, this.previewCoreMesh);
+      if (mesh) {
+        if (!this.previewCoreMesh) {
+          this.previewCoreMesh = mesh;
+          this.group.add(mesh);
+        }
+      } else {
+        this.clearRibbon();
       }
       this.lastMeshValid = valid;
       this.updateAnchors(anchorPoints, valid);
@@ -91,6 +93,10 @@ export class RoadPreview {
     }
 
     this.updateSnapMarker(snapPoint);
+  }
+
+  updateSnapMarker(snapPoint: THREE.Vector3 | null): void {
+    this.updateSnapMarkerInternal(snapPoint);
   }
 
   setValidity(valid: boolean): void {
@@ -114,6 +120,10 @@ export class RoadPreview {
 
   dispose(): void {
     this.clear();
+    if (this.previewCoreMesh) {
+      this.previewCoreMesh.geometry.dispose();
+      this.previewCoreMesh = null;
+    }
     this.marker.geometry.dispose();
     this.anchorMarkers.geometry.dispose();
     this.anchorMaterialValid.dispose();
@@ -121,26 +131,21 @@ export class RoadPreview {
   }
 
   private applyValidityMaterials(valid: boolean): void {
-    if (!this.previewRibbon) return;
-    const coreMaterial = valid ? this.materials.previewValid : this.materials.previewInvalid;
-    const blendMaterial = valid ? this.materials.previewBlendValid : this.materials.previewBlendInvalid;
-    for (const child of this.previewRibbon.children) {
-      if (!(child instanceof THREE.Mesh)) continue;
-      child.material = child.userData.previewPart === 'blend' ? blendMaterial : coreMaterial;
-    }
+    if (!this.previewCoreMesh) return;
+    this.previewCoreMesh.material = valid ? this.materials.previewValid : this.materials.previewInvalid;
   }
 
   private clearRibbon(): void {
     this.lastGeometrySignature = '';
     this.lastMeshValid = null;
-    if (this.previewRibbon) {
-      this.group.remove(this.previewRibbon);
-      disposeObject3D(this.previewRibbon);
-      this.previewRibbon = null;
+    if (this.previewCoreMesh) {
+      this.group.remove(this.previewCoreMesh);
+      this.previewCoreMesh.geometry.dispose();
+      this.previewCoreMesh = null;
     }
   }
 
-  private updateSnapMarker(snapPoint: THREE.Vector3 | null): void {
+  private updateSnapMarkerInternal(snapPoint: THREE.Vector3 | null): void {
     if (snapPoint) {
       this.marker.visible = true;
       this.marker.position.set(snapPoint.x, snapPoint.y + 0.22, snapPoint.z);

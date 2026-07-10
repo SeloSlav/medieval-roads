@@ -41,6 +41,7 @@ export class BuildingTool {
   private pointerX = 0;
   private pointerY = 0;
   private pointerInside = false;
+  private pointerDirty = false;
   private lastPreviewX = Number.NaN;
   private lastPreviewZ = Number.NaN;
   private lastPreviewValidation: BuildingPlacementResult | null = null;
@@ -87,6 +88,11 @@ export class BuildingTool {
     if (this.options.isBlocked()) {
       this.clearPreview();
       this.options.onPreviewChange?.(null);
+      return;
+    }
+    if (this.pointerDirty) {
+      this.pointerDirty = false;
+      this.processPointerHover();
     }
   }
 
@@ -108,6 +114,7 @@ export class BuildingTool {
 
   private readonly onPointerEnter = (): void => {
     this.pointerInside = true;
+    this.pointerDirty = true;
   };
 
   private readonly onPointerLeave = (): void => {
@@ -120,8 +127,11 @@ export class BuildingTool {
     this.pointerX = event.clientX;
     this.pointerY = event.clientY;
     if (this.mode === 'off' || !this.pointerInside || this.options.isBlocked()) return;
+    this.pointerDirty = true;
+  };
 
-    const point = this.options.terrainProjector.pick(event.clientX, event.clientY);
+  private processPointerHover(): void {
+    const point = this.options.terrainProjector.pick(this.pointerX, this.pointerY);
     if (!point) {
       this.clearPreview();
       this.options.onPreviewChange?.(null);
@@ -135,7 +145,7 @@ export class BuildingTool {
     }
 
     this.refreshPreviewAt(point);
-  };
+  }
 
   private readonly onPointerDown = (event: MouseEvent): void => {
     if (event.button !== 0 || this.mode === 'off') return;
@@ -217,6 +227,7 @@ export class BuildingTool {
   }
 
   private resetPreviewCache(): void {
+    this.pointerDirty = false;
     this.lastPreviewX = Number.NaN;
     this.lastPreviewZ = Number.NaN;
     this.lastPreviewValidation = null;

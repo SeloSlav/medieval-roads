@@ -2,9 +2,8 @@ import * as THREE from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { vertexColor } from 'three/tsl';
 import type { Terrain } from '../terrain/Terrain.ts';
-import type { RoadEdge } from '../roads/RoadEdge.ts';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
-import { distancePointToPolylineXZ } from '../utils/pathGeometry.ts';
+import { RoadSpatialIndex } from '../roads/roadSpatialIndex.ts';
 import {
   createForestCores,
   createForestSpawnConfig,
@@ -35,6 +34,7 @@ export type GrassBladeField = {
   group: THREE.Group;
   syncRoadClearance: (network: RoadNetwork) => void;
   setBuildInteractionActive: (active: boolean) => void;
+  setRoadDraftActive: (active: boolean) => void;
   updateCameraState: (
     cameraPosition: THREE.Vector3,
     cameraTarget: THREE.Vector3,
@@ -64,7 +64,7 @@ type GrassFieldContext = {
   terrainExtent: number;
   forestCores: ReturnType<typeof createForestCores>;
   isBlockedAt?: (x: number, z: number) => boolean;
-  roadEdges: RoadEdge[];
+  roadSpatialIndex: RoadSpatialIndex | null;
 };
 
 type PendingSlot = {
@@ -95,7 +95,7 @@ export function createGrassBladeField(
     terrainExtent: spawnConfig.terrainExtent,
     forestCores: createForestCores(mulberry32(0x6a55b1ade), spawnConfig),
     isBlockedAt: options?.isBlockedAt,
-    roadEdges: [],
+    roadSpatialIndex: null,
   };
 
   const material = createGrassBladeMaterial();
@@ -209,6 +209,7 @@ export function createGrassBladeField(
   };
 
   let buildInteractionActive = false;
+  let roadDraftActive = false;
   let boundingSphereFrame = 0;
 
   const stepPendingSlots = (focusX: number, focusZ: number): void => {
@@ -250,11 +251,15 @@ export function createGrassBladeField(
   return {
     group,
     syncRoadClearance(network: RoadNetwork) {
-      context.roadEdges = [...network.edges.values()];
+      context.roadSpatialIndex = RoadSpatialIndex.fromNetwork(network);
       roadClearanceDirty = true;
     },
     setBuildInteractionActive(active: boolean) {
       buildInteractionActive = active;
+    },
+    setRoadDraftActive(active: boolean) {
+      roadDraftActive = active;
+      if (active) pendingSlots = [];
     },
     updateCameraState(
       cameraPosition: THREE.Vector3,
@@ -292,6 +297,8 @@ export function createGrassBladeField(
       }
       wasGrassVisible = true;
 
+      if (roadDraftActive) return;
+
       const focusX = firstPersonActive ? cameraPosition.x : cameraTarget.x;
       const focusZ = firstPersonActive ? cameraPosition.z : cameraTarget.z;
       const centerChunkX = Math.floor(focusX / GRASS_BLADE_CHUNK_SIZE);
@@ -318,6 +325,7 @@ function createDisabledGrassBladeField(): GrassBladeField {
     group,
     syncRoadClearance() {},
     setBuildInteractionActive() {},
+    setRoadDraftActive() {},
     updateCameraState() {},
     dispose() {},
   };
@@ -350,7 +358,7 @@ function writeChunkInstances(
   context: GrassFieldContext,
   maxInstances = Number.POSITIVE_INFINITY,
 ): number {
-  const { terrain, extent, terrainExtent, forestCores, isBlockedAt, roadEdges } = context;
+  const { terrain, extent, terrainExtent, forestCores, isBlockedAt, roadSpatialIndex } = context;
   const rng = mulberry32(chunkSeed(chunkX, chunkZ));
   const chunkMinX = chunkX * GRASS_BLADE_CHUNK_SIZE;
   const chunkMinZ = chunkZ * GRASS_BLADE_CHUNK_SIZE;
@@ -402,7 +410,7 @@ function writeChunkInstances(
 
     if (!isInsidePlayableExtent(x, z, extent)) continue;
     if (isBlockedAt?.(x, z)) continue;
-    if (isGrassNearAnyEdge(x, z, roadEdges)) continue;
+    if (isGrassNearAnyRoad(x, z, roadSpatialIndex)) continue;
 
     const focusDist = Math.hypot(x - focusX, z - focusZ);
     const edgeFade = grassEdgeFadeFromFocusDistance(focusDist);
@@ -489,15 +497,9 @@ function createGrassBladeMaterial(): MeshStandardNodeMaterial {
   return material;
 }
 
-function isGrassNearAnyEdge(x: number, z: number, edges: RoadEdge[]): boolean {
-  for (const edge of edges) {
-    const path = edge.sampledPath.length >= 2 ? edge.sampledPath : edge.controlPoints;
-    if (path.length < 2) continue;
-    if (distancePointToPolylineXZ(x, z, path) <= edge.width * 0.5 + ROAD_CLEAR_MARGIN) {
-      return true;
-    }
-  }
-  return false;
+function isGrassNearAnyRoad(x: number, z: number, index: RoadSpatialIndex | null): boolean {
+  if (!index) return false;
+  return index.isNearAnyRoad(x, z, ROAD_CLEAR_MARGIN);
 }
 
 function createGrassTuftGeometry(): THREE.BufferGeometry {

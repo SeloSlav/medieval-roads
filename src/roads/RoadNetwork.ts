@@ -1,6 +1,7 @@
 ﻿import * as THREE from 'three';
 import type { RoadEdge } from './RoadEdge.ts';
 import type { JunctionType, RoadNode } from './RoadNode.ts';
+import { RoadSpatialIndex } from './roadSpatialIndex.ts';
 
 export type SnapTarget =
   | { kind: 'node'; nodeId: string; point: THREE.Vector3; distance: number }
@@ -42,13 +43,29 @@ export class RoadNetwork {
   readonly edges = new Map<string, RoadEdge>();
   private nextNodeId = 1;
   private nextEdgeId = 1;
+  private spatialIndex: RoadSpatialIndex | null = null;
+  private spatialIndexDirty = true;
+
+  getSpatialIndex(): RoadSpatialIndex {
+    if (this.spatialIndexDirty || !this.spatialIndex) {
+      this.spatialIndex = new RoadSpatialIndex(this.nodes.values(), this.edges.values());
+      this.spatialIndexDirty = false;
+    }
+    return this.spatialIndex;
+  }
+
+  nearestPointDistance(x: number, z: number, maxDistance = Infinity): number {
+    return this.getSpatialIndex().nearestDistance(x, z, maxDistance);
+  }
 
   findSnap(point: THREE.Vector3, maxDistance = 5.2): SnapTarget | null {
     if (this.nodes.size === 0 && this.edges.size === 0) return null;
 
     let best: SnapTarget | null = null;
     const maxDistanceSq = maxDistance * maxDistance;
-    for (const node of this.nodes.values()) {
+    const { nodes, edges } = this.getSpatialIndex().collectSnapCandidates(point.x, point.z, maxDistance);
+
+    for (const node of nodes) {
       const dx = point.x - node.position.x;
       const dz = point.z - node.position.z;
       const distanceSq = dx * dx + dz * dz;
@@ -59,15 +76,25 @@ export class RoadNetwork {
       }
     }
 
-    for (const edge of this.edges.values()) {
-      const samples = edge.controlPoints.length >= 2 ? edge.controlPoints : getEdgePath(edge);
+    for (const indexed of edges) {
+      const samples = indexed.path;
       if (samples.length < 2) continue;
-      if (!isPointNearPolylineBounds(point, samples, maxDistance)) continue;
       for (let i = 0; i < samples.length - 1; i++) {
-        const projection = projectPointToSegmentXZ(point, samples[i], samples[i + 1]);
+        const projection = projectPointToSegmentXZInto(
+          point,
+          samples[i],
+          samples[i + 1],
+          snapProjectionScratch,
+        );
         if (projection.distance <= maxDistance && (!best || projection.distance < best.distance)) {
           const t = (i + projection.t) / Math.max(1, samples.length - 1);
-          best = { kind: 'segment', edgeId: edge.id, point: projection.point, distance: projection.distance, t };
+          best = {
+            kind: 'segment',
+            edgeId: indexed.edgeId,
+            point: projection.point.clone(),
+            distance: projection.distance,
+            t,
+          };
         }
       }
     }
@@ -131,6 +158,7 @@ export class RoadNetwork {
 
     this.pruneOrphans();
     this.classifyJunctions();
+    this.invalidateSpatialIndex();
     return addedEdges;
   }
 
@@ -140,6 +168,7 @@ export class RoadNetwork {
     this.removeEdge(edgeId);
     this.pruneOrphans();
     this.classifyJunctions();
+    this.invalidateSpatialIndex();
     return true;
   }
 
@@ -168,6 +197,7 @@ export class RoadNetwork {
   restore(snapshot: RoadNetworkSnapshot): void {
     this.nodes.clear();
     this.edges.clear();
+    this.invalidateSpatialIndex();
     this.nextNodeId = snapshot.nextNodeId;
     this.nextEdgeId = snapshot.nextEdgeId;
     for (const node of snapshot.nodes) {
@@ -198,6 +228,7 @@ export class RoadNetwork {
       this.nodes.get(edge.endNodeId)?.edgeIds.add(edge.id);
     }
     this.classifyJunctions();
+    this.invalidateSpatialIndex();
   }
 
   getConnectedEdges(node: RoadNode): RoadEdge[] {
@@ -270,6 +301,7 @@ export class RoadNetwork {
       junctionType: 'endpoint',
     };
     this.nodes.set(node.id, node);
+    this.invalidateSpatialIndex();
     return node;
   }
 
@@ -289,6 +321,7 @@ export class RoadNetwork {
     this.edges.set(edge.id, edge);
     this.nodes.get(startNodeId)?.edgeIds.add(edge.id);
     this.nodes.get(endNodeId)?.edgeIds.add(edge.id);
+    this.invalidateSpatialIndex();
     return edge;
   }
 
@@ -298,6 +331,11 @@ export class RoadNetwork {
     this.nodes.get(edge.startNodeId)?.edgeIds.delete(edgeId);
     this.nodes.get(edge.endNodeId)?.edgeIds.delete(edgeId);
     this.edges.delete(edgeId);
+    this.invalidateSpatialIndex();
+  }
+
+  private invalidateSpatialIndex(): void {
+    this.spatialIndexDirty = true;
   }
 
   private pruneOrphans(): void {
@@ -336,24 +374,6 @@ function classify(count: number): JunctionType {
 
 function getEdgePath(edge: RoadEdge): THREE.Vector3[] {
   return edge.sampledPath.length >= 2 ? edge.sampledPath : edge.controlPoints;
-}
-
-function isPointNearPolylineBounds(point: THREE.Vector3, path: THREE.Vector3[], padding: number): boolean {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const sample of path) {
-    if (sample.x < minX) minX = sample.x;
-    if (sample.x > maxX) maxX = sample.x;
-    if (sample.z < minZ) minZ = sample.z;
-    if (sample.z > maxZ) maxZ = sample.z;
-  }
-  minX -= padding;
-  maxX += padding;
-  minZ -= padding;
-  maxZ += padding;
-  return point.x >= minX && point.x <= maxX && point.z >= minZ && point.z <= maxZ;
 }
 
 function simplifyPath(points: THREE.Vector3[], minDistance: number): THREE.Vector3[] {
@@ -400,16 +420,29 @@ function nearestPathIndex(path: THREE.Vector3[], point: THREE.Vector3): { index:
 }
 
 function projectPointToSegmentXZ(point: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3): { point: THREE.Vector3; distance: number; t: number } {
+  return projectPointToSegmentXZInto(point, a, b, new THREE.Vector3());
+}
+
+const snapProjectionScratch = new THREE.Vector3();
+
+function projectPointToSegmentXZInto(
+  point: THREE.Vector3,
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  target: THREE.Vector3,
+): { point: THREE.Vector3; distance: number; t: number } {
   const abx = b.x - a.x;
   const abz = b.z - a.z;
   const lengthSq = abx * abx + abz * abz;
   const t = lengthSq <= 1e-6 ? 0 : THREE.MathUtils.clamp(((point.x - a.x) * abx + (point.z - a.z) * abz) / lengthSq, 0, 1);
-  const projected = new THREE.Vector3(
+  target.set(
     THREE.MathUtils.lerp(a.x, b.x, t),
     THREE.MathUtils.lerp(a.y, b.y, t),
-    THREE.MathUtils.lerp(a.z, b.z, t)
+    THREE.MathUtils.lerp(a.z, b.z, t),
   );
-  return { point: projected, distance: distanceXZ(point, projected), t };
+  const dx = point.x - target.x;
+  const dz = point.z - target.z;
+  return { point: target, distance: Math.hypot(dx, dz), t };
 }
 
 function segmentIntersectionXZ(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): { point: THREE.Vector3; tA: number; tB: number } | null {

@@ -63,7 +63,14 @@ export function laborScaledInterval(baseInterval: number, assignedLabor: number)
   return baseInterval / assignedLabor;
 }
 
+let cachedState: GameState | null = null;
+let cachedTotals: ResourceTotals | null = null;
+
 export function computeResourceTotals(state: GameState): ResourceTotals {
+  if (cachedState === state && cachedTotals) {
+    return cachedTotals;
+  }
+
   let timber = state.stockpile.timber;
   let stone = state.stockpile.stone;
   let firewood = state.stockpile.firewood;
@@ -78,12 +85,14 @@ export function computeResourceTotals(state: GameState): ResourceTotals {
     firewood += residence.firewoodStock;
   }
 
-  return {
+  cachedTotals = {
     timber,
     stone,
     firewood,
     water: state.stockpile.water,
   };
+  cachedState = state;
+  return cachedTotals;
 }
 
 export function computePopulationStats(state: GameState): PopulationStats {

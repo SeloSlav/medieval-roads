@@ -636,6 +636,7 @@ export class App {
     const burgageDraft = Boolean(this.burgageTool?.isEnabled() && this.burgageTool.hasDraft());
     const buildingActive = Boolean(this.buildingTool?.isEnabled());
     this.sceneManager?.setBuildInteractionActive(roadDraft || burgageDraft || buildingActive);
+    this.sceneManager?.setRoadDraftActive(roadDraft);
   }
 
   private updateBuildButtonPosition(): void {
