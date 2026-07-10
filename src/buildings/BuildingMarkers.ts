@@ -34,11 +34,7 @@ export class BuildingMarkers {
   }
 
   setSelectedWorkExtent(building: BuildingState | null): void {
-    if (
-      !building
-      || building.workRadius <= 0
-      || (building.kind !== 'lumber_mill' && building.kind !== 'stone_quarry')
-    ) {
+    if (!building || building.workRadius <= 0) {
       if (this.selectedWorkExtentMesh) this.selectedWorkExtentMesh.visible = false;
       return;
     }
@@ -174,12 +170,16 @@ export class BuildingMarkers {
   }
 }
 
-function workExtentColor(kind: Extract<BuildingKind, 'lumber_mill' | 'stone_quarry'>): number {
+function workExtentColor(kind: BuildingKind): number {
   switch (kind) {
     case 'lumber_mill':
       return 0xd7b463;
+    case 'reforester':
+      return 0x00cc66;
     case 'stone_quarry':
       return 0xa8a29e;
+    case 'woodcutters_lodge':
+      return 0xd7b463;
     default: {
       const unreachable: never = kind;
       return unreachable;
