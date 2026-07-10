@@ -4,7 +4,7 @@ import type { RoadNetwork } from '../roads/RoadNetwork.ts';
 import type { GameState } from '../resources/types.ts';
 import { computeResourceTotals } from '../resources/resourceTotals.ts';
 import type { BurgageFrontageEdge } from './burgageLayout.ts';
-import { cornersFromPoints, resolveBurgageLayout } from './burgageLayout.ts';
+import { cornersFromPoints, MAX_ZONE_DEPTH, MIN_ZONE_DEPTH, resolveBurgageLayout } from './burgageLayout.ts';
 import {
   rectangleCornersToPoints,
   rectangleFromFrontageAndBackPoint,
@@ -126,14 +126,15 @@ export class BurgageTool {
       return 'Click the second corner along the road';
     }
     if (this.placementStage === 2) {
-      return 'Click the third corner to set plot depth';
+      return `Click the third corner to set plot depth (${Math.round(MIN_ZONE_DEPTH)}–${Math.round(MAX_ZONE_DEPTH)}m)`;
     }
     if (this.placementStage === 3) {
       return 'Click the fourth corner to close the rectangle';
     }
     const validation = this.getValidation();
     if (!validation.ok) {
-      if (validation.reason === 'too_small') return 'Draw the plot deeper behind the road (~14m minimum)';
+      if (validation.reason === 'too_small') return `Draw the plot deeper behind the road (~${Math.round(MIN_ZONE_DEPTH)}m minimum)`;
+      if (validation.reason === 'too_deep') return `Shorten the backyard — max depth is ~${Math.round(MAX_ZONE_DEPTH)}m`;
       if (validation.reason === 'no_fit') return 'Too many plots — press − to reduce plot count';
       if (validation.reason === 'insufficient_resources') return 'Not enough timber or stone';
       return 'Adjust plot shape or plot count';

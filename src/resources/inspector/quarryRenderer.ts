@@ -12,13 +12,16 @@ export function renderQuarryInspector(
   return {
     eyebrow: 'Quarry',
     title: definition.label,
-    statusText: `${Math.round(state.remaining)} / ${Math.round(state.maxYield)} stone remaining`,
+    statusText: state.remaining > 0
+      ? `${Math.round(state.remaining)} / ${Math.round(state.maxYield)} stone remaining`
+      : 'Depleted — no stone left',
     statusState: state.remaining > 0 ? 'active' : 'idle',
     detailsHtml: `
       <li><span>Resource</span><span>stone</span></li>
       <li><span>Site ID</span><span>${definition.id}</span></li>
       <li><span>Yield left</span><span>${Math.round(state.remaining)}</span></li>
       <li><span>Nearest road</span><span>${nearestRoad == null ? 'None nearby' : `${nearestRoad.toFixed(1)} m`}</span></li>
+      <li><span>Labor</span><span>Assign at a stonecutter's camp</span></li>
     `,
     demolish: hiddenDemolish(),
     labor: hiddenLabor(),

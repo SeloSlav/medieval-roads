@@ -21,6 +21,7 @@ export const TOAST_MESSAGES = {
   'burgage.placement.too_steep': 'The slope is too steep here',
   'burgage.placement.invalid_shape': 'Invalid residence plot shape',
   'burgage.placement.too_small': 'Plot is too shallow — pull the back edge farther from the road',
+  'burgage.placement.too_deep': 'Plot is too deep — shorten the backyard behind the road',
   'burgage.placement.no_road_frontage': 'Frontage must face a road',
   'burgage.placement.overlaps_existing': 'Overlaps an existing residence plot',
   'burgage.placement.overlaps_building': 'Overlaps an existing building',
@@ -64,6 +65,8 @@ export function burgagePlacementReasonToToastId(reason: BurgagePlacementFailureR
       return 'burgage.placement.invalid_shape';
     case 'too_small':
       return 'burgage.placement.too_small';
+    case 'too_deep':
+      return 'burgage.placement.too_deep';
     case 'no_road_frontage':
       return 'burgage.placement.no_road_frontage';
     case 'overlaps_existing':

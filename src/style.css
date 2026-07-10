@@ -242,6 +242,10 @@ button {
   padding: 0 16px 12px;
 }
 
+.resource-inspector-labor[hidden] {
+  display: none;
+}
+
 .resource-inspector-labor-row {
   display: flex;
   align-items: center;

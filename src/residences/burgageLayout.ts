@@ -42,6 +42,9 @@ export const MAIN_HOUSE_DEPTH = 7.4;
 export const RESIDENCE_PICK_RADIUS = 5.5;
 export const MIN_PARCEL_DEPTH = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + 2.5;
 export const MIN_ZONE_DEPTH = MIN_PARCEL_DEPTH;
+/** Usable garden/livestock strip behind the house footprint. */
+export const MAX_BACKYARD_DEPTH = 12;
+export const MAX_ZONE_DEPTH = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + MAX_BACKYARD_DEPTH;
 export const MAX_ROAD_FRONTAGE_DISTANCE = 16;
 
 const CORNER_KEYS = ['a', 'b', 'c', 'd'] as const;

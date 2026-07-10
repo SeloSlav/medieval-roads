@@ -1,6 +1,9 @@
 use spacetimedb::{reducer, ReducerContext, Table};
 
-use crate::burgage::{compute_burgage_layout, convex_zones_overlap, zone_corners_polygon, ZoneCorners};
+use crate::burgage::{
+    compute_burgage_layout, convex_zones_overlap, max_zone_depth, measure_zone_depth, min_zone_depth,
+    zone_corners_polygon, ZoneCorners,
+};
 use crate::db::*;
 use crate::economy::{
     credit_treasury_stone, credit_treasury_timber, residence_population, residence_zone_cost,
@@ -80,6 +83,14 @@ pub fn place_burgage_zone(
 
     if burgage_zone_overlaps_buildings(ctx, &corners) {
         return Err("Residence plot overlaps an existing building.".to_string());
+    }
+
+    let zone_depth = measure_zone_depth(&corners, frontage_edge);
+    if zone_depth + 1e-6 < min_zone_depth() {
+        return Err("Plot is too shallow — pull the back edge farther from the road.".to_string());
+    }
+    if zone_depth > max_zone_depth() + 0.05 {
+        return Err("Plot is too deep — shorten the backyard behind the road.".to_string());
     }
 
     let layout = compute_burgage_layout(&corners, frontage_edge, plot_count)

@@ -8,6 +8,7 @@ import {
   type BurgageLayoutResult,
   type BurgageZoneCorners,
   MAX_ROAD_FRONTAGE_DISTANCE,
+  MAX_ZONE_DEPTH,
   MIN_PLOT_FRONTAGE,
   MIN_ZONE_DEPTH,
   autoFrontageEdge,
@@ -26,6 +27,7 @@ export type BurgagePlacementFailureReason =
   | 'too_steep'
   | 'invalid_shape'
   | 'too_small'
+  | 'too_deep'
   | 'no_road_frontage'
   | 'overlaps_existing'
   | 'overlaps_building'
@@ -100,6 +102,11 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
     return { ok: false, reason: 'too_small' };
   }
 
+  const zoneDepth = measureZoneDepth(zoneCorners, context.frontageEdge);
+  if (zoneDepth > MAX_ZONE_DEPTH + 0.05) {
+    return { ok: false, reason: 'too_deep' };
+  }
+
   const roadDistance = (edge: BurgageFrontageEdge) =>
     edgeDistanceToRoads(zoneCorners, edge, context.roadNetwork);
   if (roadDistance(context.frontageEdge) > MAX_ROAD_FRONTAGE_DISTANCE) {
@@ -108,7 +115,7 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
 
   const layout = resolveBurgageLayout(zoneCorners, context.frontageEdge, context.plotCount);
   if (!layout || layout.residences.length === 0) {
-    if (measureZoneDepth(zoneCorners, context.frontageEdge) < MIN_ZONE_DEPTH) {
+    if (zoneDepth < MIN_ZONE_DEPTH) {
       return { ok: false, reason: 'too_small' };
     }
     return { ok: false, reason: 'no_fit' };

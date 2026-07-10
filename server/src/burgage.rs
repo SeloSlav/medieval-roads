@@ -31,10 +31,32 @@ const HOUSE_SETBACK: f64 = 3.5;
 const MAIN_HOUSE_WIDTH: f64 = 6.6;
 const MAIN_HOUSE_DEPTH: f64 = 7.4;
 const MIN_PARCEL_DEPTH: f64 = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + 2.5;
+const MIN_ZONE_DEPTH: f64 = MIN_PARCEL_DEPTH;
+const MAX_BACKYARD_DEPTH: f64 = 12.0;
+const MAX_ZONE_DEPTH: f64 = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + MAX_BACKYARD_DEPTH;
 const ZONE_BOUNDARY_EPSILON: f64 = 0.12;
 
 pub fn suggest_plot_count(frontage_length: f64) -> u32 {
     (frontage_length / MIN_PLOT_FRONTAGE).floor().max(1.0) as u32
+}
+
+pub fn measure_zone_depth(corners: &ZoneCorners, frontage_edge: u8) -> f64 {
+    if frontage_edge > 3 {
+        return 0.0;
+    }
+    let (front_start, front_end) = zone_edge(corners, frontage_edge);
+    let rear_edge = (frontage_edge + 2) % 4;
+    let (rear_end, rear_start) = zone_edge(corners, rear_edge);
+    distance_point_to_segment(&front_start, &rear_start, &rear_end)
+        .min(distance_point_to_segment(&front_end, &rear_start, &rear_end))
+}
+
+pub fn max_zone_depth() -> f64 {
+    MAX_ZONE_DEPTH
+}
+
+pub fn min_zone_depth() -> f64 {
+    MIN_ZONE_DEPTH
 }
 
 pub fn zone_corners_polygon(corners: &ZoneCorners) -> [Point2; 4] {
