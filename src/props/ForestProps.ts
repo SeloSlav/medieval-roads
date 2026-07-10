@@ -928,8 +928,6 @@ function createMixedMountainForest(
   placements.forEach((placement, treeIndex) => {
     const profile = getTreeSpeciesProfile(placement.species);
     const rootY = terrain.getHeightAt(placement.x, placement.z);
-    const isYoung = placement.form === 'young';
-    const isMidstory = placement.form === 'midstory';
     const height = getRenderedTreeHeight(placement, profile, rng);
     const trunkRadius = getRenderedTrunkRadius(placement, profile, rng);
     const lean = new THREE.Vector3(
@@ -937,11 +935,7 @@ function createMixedMountainForest(
       1,
       (rng() - 0.5) * (profile.canopy === 'broadleaf' ? 0.058 : 0.042),
     ).normalize();
-    const crownTop = Math.min(0.97, profile.lowWhorl + profile.crownSpan + (isYoung ? 0.06 : 0.02));
-    const trunkHeight =
-      profile.canopy === 'broadleaf'
-        ? height * (isMidstory ? 0.74 : 0.82)
-        : height * crownTop + 0.38 * placement.scale;
+    const trunkHeight = getRenderedTrunkHeight(placement, profile, height);
     root.set(placement.x, rootY, placement.z);
     const trunkTop = root.clone().addScaledVector(lean, trunkHeight);
     composeBranchMatrix(root, trunkTop, trunkRadius, matrix, quaternion, scaleVector, position);
@@ -1099,6 +1093,47 @@ function getRenderedTrunkRadius(
   return (0.25 + rng() * 0.14) * placement.scale * profile.trunkMul * formMul;
 }
 
+function getConiferCrownBounds(
+  profile: TreeSpeciesProfile,
+  isYoung: boolean,
+): { crownBase: number; crownTop: number } {
+  const crownBase = Math.min(isYoung ? Math.max(profile.lowWhorl, 0.22) : profile.lowWhorl, 0.42);
+  const crownSpan = Math.min(profile.crownSpan * (isYoung ? 0.78 : 1), 0.86 - crownBase);
+  return { crownBase, crownTop: crownBase + crownSpan };
+}
+
+function getBroadleafCrownBounds(
+  profile: TreeSpeciesProfile,
+  isYoung: boolean,
+  isMidstory: boolean,
+): { crownBase: number; crownTop: number } {
+  const crownBase = Math.min(isYoung ? Math.max(profile.lowWhorl, 0.28) : profile.lowWhorl, 0.64);
+  const crownSpan = Math.min(
+    profile.crownSpan * (isMidstory ? 0.78 : isYoung ? 0.72 : 1),
+    0.94 - crownBase,
+  );
+  return { crownBase, crownTop: crownBase + crownSpan };
+}
+
+function getRenderedTrunkHeight(
+  placement: TreePlacement,
+  profile: TreeSpeciesProfile,
+  height: number,
+): number {
+  const isYoung = placement.form === 'young';
+  const isMidstory = placement.form === 'midstory';
+
+  if (profile.canopy === 'conifer') {
+    const { crownTop } = getConiferCrownBounds(profile, isYoung);
+    // Meet the top foliage tier at its center; foliage geometry extends above this point.
+    return height * crownTop;
+  }
+
+  const { crownTop } = getBroadleafCrownBounds(profile, isYoung, isMidstory);
+  const broadleafCap = isMidstory ? 0.74 : 0.82;
+  return height * Math.min(broadleafCap, crownTop);
+}
+
 function placeConiferCrown(options: {
   placement: TreePlacement;
   profile: TreeSpeciesProfile;
@@ -1145,8 +1180,8 @@ function placeConiferCrown(options: {
   } = options;
   const yawOffset = rng() * TAU;
   const isYoung = placement.form === 'young';
-  const lowWhorl = Math.min(isYoung ? Math.max(profile.lowWhorl, 0.22) : profile.lowWhorl, 0.42);
-  const crownSpan = Math.min(profile.crownSpan * (isYoung ? 0.78 : 1), 0.86 - lowWhorl);
+  const { crownBase: lowWhorl, crownTop } = getConiferCrownBounds(profile, isYoung);
+  const crownSpan = crownTop - lowWhorl;
   const scaleMul = isYoung ? 0.74 : 1;
   let maxTierRadius = 0;
 
@@ -1245,8 +1280,8 @@ function placeBroadleafCrown(options: {
   const yawOffset = rng() * TAU;
   const isYoung = placement.form === 'young';
   const isMidstory = placement.form === 'midstory';
-  const crownBase = Math.min(isYoung ? Math.max(profile.lowWhorl, 0.28) : profile.lowWhorl, 0.64);
-  const crownSpan = Math.min(profile.crownSpan * (isMidstory ? 0.78 : isYoung ? 0.72 : 1), 0.94 - crownBase);
+  const { crownBase, crownTop } = getBroadleafCrownBounds(profile, isYoung, isMidstory);
+  const crownSpan = crownTop - crownBase;
   const scaleMul = isYoung ? 0.72 : isMidstory ? 0.82 : 1;
   const crownBreadth =
     placement.species === 'sessileOak'

@@ -3,6 +3,7 @@ import { TREE_SHADOW_CAST_LAYER } from '../scene/SceneLayers.ts';
 import { createRockShadowGeometry } from '../props/ForestProps.ts';
 import type { Terrain } from '../terrain/Terrain.ts';
 import type { RiverField } from './RiverField.ts';
+import { buildRiverShoreCrossingGaps, isInRiverShoreCrossingGap } from './RiverShoreCrossingGaps.ts';
 
 type RockShadowMaterials = {
   shadowCast: THREE.MeshStandardMaterial;
@@ -74,6 +75,7 @@ export function createRiverShoreStones(
 
 function createShoreStonePlacements(riverField: RiverField, rng: () => number): StonePlacement[] {
   const placements: StonePlacement[] = [];
+  const crossingGaps = buildRiverShoreCrossingGaps(riverField.layout);
   const { resolution, startX, startZ, stepX, stepZ } = riverField;
 
   for (let gridZ = 0; gridZ < resolution; gridZ++) {
@@ -92,6 +94,7 @@ function createShoreStonePlacements(riverField: RiverField, rng: () => number): 
       const x = wx + jitterX;
       const z = wz + jitterZ;
       if (riverField.isWaterAt(x, z)) continue;
+      if (isInRiverShoreCrossingGap(riverField.layout, crossingGaps, x, z)) continue;
 
       const bankNoise = valueNoise2(x * 0.08 + 14.2, z * 0.08 - 6.4);
       const chance = THREE.MathUtils.clamp(0.18 + (1 - shore / 5.4) * 0.42 + bankNoise * 0.22, 0.08, 0.72);

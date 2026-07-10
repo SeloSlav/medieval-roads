@@ -3,6 +3,12 @@ import type { Terrain } from '../terrain/Terrain.ts';
 import type { RiverField } from './RiverField.ts';
 import { VirtualPipesWater2D } from './virtualPipesWater.ts';
 import { disposeSharedRiverWaterMaterial, getSharedRiverWaterMaterial } from './RiverWaterMaterial.ts';
+import {
+  computeWaterFeatherAlpha,
+  computeWaterFoamBase,
+  createRiverWaterShoreMaps,
+  disposeRiverWaterShoreMaps,
+} from './riverWaterShoreMaps.ts';
 
 const RIVER_WATER_DEPTH = 1.05;
 const RIVER_CENTER_DEPTH_BOOST = 0.2;
@@ -11,7 +17,6 @@ const WATER_SIM_RENDER_DELTA_SCALE = 0.16;
 const MAX_SIM_CATCHUP_STEPS = 2;
 const WATER_CPU_UPDATE_INTERVAL_SEC = 1 / 20;
 const WATER_CLIP_FEATHER = -0.62;
-const WATER_ALPHA_FEATHER_IN = 1.45;
 
 export { disposeSharedRiverWaterMaterial };
 
@@ -202,6 +207,7 @@ export function createRiverWaterMesh(
   const nz = riverField.resolution;
   if (nx < 2 || nz < 2) return null;
 
+  const shoreMaps = createRiverWaterShoreMaps(riverField);
   const organicSigned = riverField.organicSignedDistance;
   const riverMask = riverField.riverMask;
 
@@ -224,12 +230,8 @@ export function createRiverWaterMesh(
     return clipSigned(iz * nx + ix, ix, iz);
   };
 
-  const computeFeatherAlpha = (gx: number, gz: number, signed: number): number => {
-    const wx = riverField.startX + gx * riverField.stepX;
-    const wz = riverField.startZ + gz * riverField.stepZ;
-    const edgeNoise = (valueNoise2D(wx * 0.22, wz * 0.22) - 0.5) * 0.1;
-    return smoothstep(WATER_CLIP_FEATHER - 0.18, WATER_ALPHA_FEATHER_IN + 0.42, signed + edgeNoise);
-  };
+  const computeFeatherAlpha = (_gx: number, _gz: number, signed: number): number =>
+    computeWaterFeatherAlpha(signed);
 
   const wetMask = new Uint8Array(nx * nz);
   let hasWet = false;
@@ -298,9 +300,7 @@ export function createRiverWaterMesh(
     const foamSigned =
       foamSignedOverride ??
       signed;
-    const foamBase = foamSigned >= 0
-      ? 1 - smoothstep(0.12, 4.8, foamSigned)
-      : 1 - smoothstep(-0.28, 0.14, foamSigned);
+    const foamBase = Math.min(1, computeWaterFoamBase(foamSigned));
     const clipSignedAt = signedOverride ?? effectiveClipSignedAt(gx, gz);
     const index = vertexGx.length;
     vertexGx.push(gx);
@@ -438,7 +438,7 @@ export function createRiverWaterMesh(
     simDeltaAttr.needsUpdate = true;
   };
 
-  const mesh = new THREE.Mesh(geometry, getSharedRiverWaterMaterial());
+  const mesh = new THREE.Mesh(geometry, getSharedRiverWaterMaterial(shoreMaps));
   mesh.name = 'River water surface';
   mesh.userData.water = true;
   mesh.raycast = () => {};
@@ -457,6 +457,8 @@ export function createRiverWaterMesh(
     disposed = true;
     if (mesh.parent === group) group.remove(mesh);
     geometry.dispose();
+    disposeRiverWaterShoreMaps(shoreMaps);
+    disposeSharedRiverWaterMaterial();
   };
 
   const tick = (dt: number, _timeSec?: number) => {

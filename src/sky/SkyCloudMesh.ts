@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loadBitmapTexture } from '../utils/textureLoad.ts';
 import { SkyCloudMesh as WebGPUSkyCloudMesh } from 'sky-cloud-3d';
 import { SkyCloudMesh as WebGLSkyCloudMesh } from 'sky-cloud-3d/webgl';
 import type { RendererBackendKind } from '../scene/RendererBackend.ts';
@@ -71,8 +72,10 @@ export function configureSkyPerlinTexture(texture: THREE.Texture): THREE.Texture
 }
 
 export async function loadSkyPerlinTexture(): Promise<THREE.Texture> {
-  const loader = new THREE.TextureLoader();
-  const texture = await loader.loadAsync(WEBGL_PERLIN_TEXTURE_URL);
+  const texture = await loadBitmapTexture(WEBGL_PERLIN_TEXTURE_URL, 1, {
+    generateMipmaps: false,
+    flipY: false,
+  });
   return configureSkyPerlinTexture(texture);
 }
 

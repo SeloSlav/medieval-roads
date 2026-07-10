@@ -122,6 +122,7 @@ export class BuildToolbar {
               <li><span>Build road</span><span class="road-controls-key">Hammer or Enter</span></li>
               <li><span>Delete segment</span><span class="road-controls-key">Alt + L-click</span></li>
               <li><span>Undo change</span><span class="road-controls-key">Ctrl + Z</span></li>
+              <li><span>Redo change</span><span class="road-controls-key">Ctrl + Y</span></li>
               <li><span>Cancel / exit</span><span class="road-controls-key">Esc</span></li>
             </ul>
           </section>

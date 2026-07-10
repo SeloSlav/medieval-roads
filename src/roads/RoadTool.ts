@@ -48,6 +48,7 @@ export class RoadTool {
   private hoverPoint: THREE.Vector3 | null = null;
   private latestSnapPoint: THREE.Vector3 | null = null;
   private undoStack: RoadNetworkSnapshot[] = [];
+  private redoStack: RoadNetworkSnapshot[] = [];
   private readonly preview: RoadPreview;
 
   constructor(options: {
@@ -122,6 +123,7 @@ export class RoadTool {
     const added = this.options.network.addRoadPath(path, ROAD_WIDTH);
     if (added.length === 0) return;
     this.undoStack.push(snapshot);
+    this.redoStack.length = 0;
     this.cancelDraft(false);
     this.options.selection.setSelected(null);
     this.options.onNetworkChanged();
@@ -131,6 +133,16 @@ export class RoadTool {
   undo(): void {
     const snapshot = this.undoStack.pop();
     if (!snapshot) return;
+    this.redoStack.push(this.options.network.snapshot());
+    this.options.network.restore(snapshot);
+    this.options.selection.setSelected(null);
+    this.options.onNetworkChanged();
+  }
+
+  redo(): void {
+    const snapshot = this.redoStack.pop();
+    if (!snapshot) return;
+    this.undoStack.push(this.options.network.snapshot());
     this.options.network.restore(snapshot);
     this.options.selection.setSelected(null);
     this.options.onNetworkChanged();
@@ -140,6 +152,7 @@ export class RoadTool {
     const snapshot = this.options.network.snapshot();
     if (this.options.selection.deleteSelected()) {
       this.undoStack.push(snapshot);
+      this.redoStack.length = 0;
       this.options.onNetworkChanged();
     }
   }
@@ -148,6 +161,7 @@ export class RoadTool {
     const snapshot = this.options.network.snapshot();
     if (!this.options.network.deleteEdge(edgeId)) return;
     this.undoStack.push(snapshot);
+    this.redoStack.length = 0;
     this.options.selection.setSelected(null);
     this.options.onNetworkChanged();
     this.refreshPreview();
@@ -244,6 +258,11 @@ export class RoadTool {
       event.preventDefault();
       if (this.hasDraft()) this.undoLastPoint();
       else this.undo();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && (key === 'y' || (event.shiftKey && key === 'z'))) {
+      event.preventDefault();
+      this.redo();
       return;
     }
     if (key === 'delete' || key === 'backspace') this.deleteSelected();

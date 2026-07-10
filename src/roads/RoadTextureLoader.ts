@@ -1,4 +1,5 @@
 ﻿import * as THREE from 'three';
+import { loadBitmapTexture } from '../utils/textureLoad.ts';
 
 export type TextureSet = {
   albedo: THREE.Texture;
@@ -18,7 +19,6 @@ export type TerrainBlendTextureSet = {
 
 export class RoadTextureLoader {
   private readonly maxAnisotropy: number;
-  private readonly loader = new THREE.TextureLoader();
 
   constructor(maxAnisotropy: number) {
     this.maxAnisotropy = maxAnisotropy;
@@ -36,6 +36,19 @@ export class RoadTextureLoader {
       this.load(`${base}/rut_mask.png`, false),
     ]);
     return { albedo, normal, roughness, ao, height, edgeMask, rutMask };
+  }
+
+  async loadBridgeTextures(): Promise<TextureSet> {
+    const base = '/assets/textures/roads/wood_logs';
+    const [albedo, normal, roughness, ao, height, edgeMask] = await Promise.all([
+      this.load(`${base}/albedo.png`, true),
+      this.load(`${base}/normal.png`, false),
+      this.load(`${base}/roughness.png`, false),
+      this.load(`${base}/ao.png`, false),
+      this.load(`${base}/height.png`, false),
+      this.load(`${base}/edge_mask.png`, false),
+    ]);
+    return { albedo, normal, roughness, ao, height, edgeMask };
   }
 
   async loadTerrainTextures(): Promise<TextureSet> {
@@ -71,17 +84,8 @@ export class RoadTextureLoader {
     return { albedo, normal, roughness, ao, height };
   }
 
-  private async load(url: string, srgb: boolean, wrapping: THREE.Wrapping = THREE.RepeatWrapping): Promise<THREE.Texture> {
-    const texture = await this.loader.loadAsync(url);
-    texture.wrapS = wrapping;
-    texture.wrapT = wrapping;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.generateMipmaps = true;
-    texture.anisotropy = Math.max(1, Math.min(16, this.maxAnisotropy));
-    if (srgb) texture.colorSpace = THREE.SRGBColorSpace;
-    texture.needsUpdate = true;
-    return texture;
+  private load(url: string, srgb: boolean, wrapping: THREE.Wrapping = THREE.RepeatWrapping): Promise<THREE.Texture> {
+    return loadBitmapTexture(url, this.maxAnisotropy, { srgb, wrapping });
   }
 }
 

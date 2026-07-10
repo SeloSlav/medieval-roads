@@ -33,6 +33,7 @@ export type FirstPersonControllerConfig = {
   domElement: HTMLElement;
   bounds: TerrainBounds;
   getHeightAt: (x: number, z: number) => number;
+  getRoadDeckY?: (x: number, z: number) => number | null;
   getOrbitSpawn?: () => FirstPersonSpawn;
   onModeChange?: (active: boolean) => void;
   isMenuOpen?: () => boolean;
@@ -242,7 +243,9 @@ export class FirstPersonController {
   }
 
   private readonly sampleTerrainGround: WalkGroundSampler = (worldX, worldZ) => {
-    return sampleTerrainWalkTop(this.config.getHeightAt, worldX, worldZ);
+    const terrainY = sampleTerrainWalkTop(this.config.getHeightAt, worldX, worldZ);
+    const roadY = this.config.getRoadDeckY?.(worldX, worldZ);
+    return roadY != null ? Math.max(terrainY, roadY) : terrainY;
   };
 
   private clampPositionXZ(): void {

@@ -6,6 +6,7 @@ import { RoadNetwork } from '../roads/RoadNetwork.ts';
 import { RoadSelection } from '../roads/RoadSelection.ts';
 import { RoadTool } from '../roads/RoadTool.ts';
 import { SceneManager } from '../scene/SceneManager.ts';
+import { beginStartupTextureLoad } from '../scene/startupTextures.ts';
 import { BuildToolbar, type ToolbarStats } from '../ui/BuildToolbar.ts';
 import { LoadingScreen } from '../ui/LoadingScreen.ts';
 import { ToastManager } from '../ui/ToastManager.ts';
@@ -40,6 +41,7 @@ export class App {
   async start(): Promise<void> {
     const loadingScreen = LoadingScreen.tryCreate();
     const materialsPromise = RoadMaterialFactory.create(8);
+    const startupTexturesPromise = beginStartupTextureLoad();
     loadingScreen?.setProgress({ label: 'Starting world…', detail: 'Setting up scene shell' });
 
     this.root.innerHTML = `
@@ -54,7 +56,7 @@ export class App {
 
     const sceneManager = await SceneManager.create(sceneRoot, (label, detail) => {
       loadingScreen?.setProgress({ label, detail });
-    }, materialsPromise);
+    }, materialsPromise, startupTexturesPromise);
     const input = new InputManager(sceneManager.renderer.domElement);
     const roadNetwork = new RoadNetwork();
     const cameraController = new CameraController({
@@ -123,6 +125,7 @@ export class App {
       domElement: sceneManager.renderer.domElement,
       bounds: sceneManager.terrain.bounds,
       getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
+      getRoadDeckY: (x, z) => sceneManager.sampleRoadDeckY(x, z),
       getOrbitSpawn: () => {
         const target = cameraController.getTargetPosition();
         return { x: target.x, z: target.z, yaw: cameraController.getYaw() };

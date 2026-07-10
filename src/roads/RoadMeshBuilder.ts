@@ -4,10 +4,18 @@ import type { RoadEdge } from './RoadEdge.ts';
 import { RoadMaterialFactory } from './RoadMaterialFactory.ts';
 import type { RoadNetwork } from './RoadNetwork.ts';
 import { trimPathAtEndpoint } from './roadEndpoint.ts';
+import {
+  applyBridgeHeightsToPath,
+  detectBridgeSpans,
+  type BridgeSamplingContext,
+  type BridgeSpan,
+} from './RiverBridgeSpans.ts';
+import { buildBridgeSupports } from './BridgeSupports.ts';
 
 const CORE_Y_OFFSET = 0.12;
 /** Slightly above core so the transparent shoulder clears the terrain depth buffer. */
 const BLEND_Y_OFFSET = 0.16;
+const BRIDGE_Y_OFFSET = 0.22;
 const CORE_EDGE_JITTER = 0.22;
 /** How far the feathered shoulder extends under the opaque core to avoid visible seams. */
 const BLEND_INNER_OVERLAP = 0.14;
@@ -16,14 +24,18 @@ type RoadCrossSection = {
   leftCore: THREE.Vector3;
   rightCore: THREE.Vector3;
   normal: THREE.Vector3;
+  bridgeBlend: number;
 };
 
 export class RoadMeshBuilder {
   private readonly terrain: Terrain;
   private readonly materials: RoadMaterialFactory;
-  constructor(terrain: Terrain, materials: RoadMaterialFactory) {
+  private readonly bridgeCtx: BridgeSamplingContext | null;
+
+  constructor(terrain: Terrain, materials: RoadMaterialFactory, bridgeCtx?: BridgeSamplingContext) {
     this.terrain = terrain;
     this.materials = materials;
+    this.bridgeCtx = bridgeCtx ?? null;
   }
 
   buildEdge(edge: RoadEdge, network: RoadNetwork): THREE.Group {
@@ -32,6 +44,11 @@ export class RoadMeshBuilder {
     edge.length = pathLength(sampled);
 
     const ribbonPath = sampled.map((point) => point.clone());
+    const spans = this.resolveBridgeSpans(ribbonPath, edge);
+    const bridgeBlends = spans.length > 0
+      ? applyBridgeHeightsToPath(ribbonPath, spans, this.requireBridgeCtx(), CORE_Y_OFFSET)
+      : new Float32Array(ribbonPath.length);
+
     const startNode = network.nodes.get(edge.startNodeId);
     const endNode = network.nodes.get(edge.endNodeId);
     const startIsEndpoint = startNode?.edgeIds.size === 1;
@@ -43,13 +60,14 @@ export class RoadMeshBuilder {
     group.name = `Road edge ${edge.id}`;
     group.userData.edgeId = edge.id;
 
-    const crossSections = this.buildCrossSections(ribbonPath, edge.width, edge.id, true);
-    const core = this.buildRibbonFromSections(crossSections, ribbonPath, this.materials.road);
+    const crossSections = this.buildCrossSections(ribbonPath, edge.width, edge.id, true, bridgeBlends);
+    const hasBridge = spans.length > 0;
+    const core = this.buildRibbonFromSections(crossSections, ribbonPath, this.materials.road, bridgeBlends);
     core.name = `Road core ${edge.id}`;
     core.userData.edgeId = edge.id;
     core.castShadow = false;
     core.receiveShadow = true;
-    core.renderOrder = 11;
+    core.renderOrder = hasBridge ? 13 : 11;
     group.add(core);
 
     const edgeBlend = this.buildEdgeBlend(crossSections, ribbonPath, edge.width, edge.id, {
@@ -60,8 +78,14 @@ export class RoadMeshBuilder {
     edgeBlend.userData.edgeId = edge.id;
     edgeBlend.castShadow = false;
     edgeBlend.receiveShadow = true;
-    edgeBlend.renderOrder = 10;
+    edgeBlend.renderOrder = hasBridge ? 12 : 10;
     group.add(edgeBlend);
+
+    if (hasBridge && this.bridgeCtx) {
+      const supports = buildBridgeSupports(ribbonPath, edge.width, spans, this.bridgeCtx, this.materials.bridgeSupport);
+      if (supports) group.add(supports);
+    }
+
     edge.mesh = group;
     return group;
   }
@@ -69,7 +93,20 @@ export class RoadMeshBuilder {
   buildPreview(points: THREE.Vector3[], width: number, valid: boolean): THREE.Mesh | null {
     const sampled = this.samplePath(points, 1.25);
     if (sampled.length < 2) return null;
-    return this.buildSimpleRibbon(sampled, width, valid ? this.materials.previewValid : this.materials.previewInvalid, 0.13, 'preview', false);
+
+    const ribbonPath = sampled.map((point) => point.clone());
+    const spans = this.bridgeCtx ? detectBridgeSpans(ribbonPath, this.bridgeCtx) : [];
+    const hasBridge = spans.length > 0;
+    if (hasBridge) {
+      applyBridgeHeightsToPath(ribbonPath, spans, this.requireBridgeCtx(), 0.13);
+    }
+
+    const material = !valid
+      ? this.materials.previewInvalid
+      : hasBridge
+        ? this.materials.previewBridge
+        : this.materials.previewValid;
+    return this.buildSimpleRibbon(ribbonPath, width, material, 0, 'preview', false);
   }
 
   buildSelection(edge: RoadEdge): THREE.Mesh | null {
@@ -102,11 +139,27 @@ export class RoadMeshBuilder {
     return sampled;
   }
 
+  private resolveBridgeSpans(path: THREE.Vector3[], edge: RoadEdge): BridgeSpan[] {
+    if (!this.bridgeCtx) return edge.materialData?.bridgeSpans ?? [];
+    const spans = detectBridgeSpans(path, this.bridgeCtx);
+    edge.materialData = {
+      surface: 'medieval_dirt',
+      bridgeSpans: spans.length > 0 ? spans : undefined,
+    };
+    return spans;
+  }
+
+  private requireBridgeCtx(): BridgeSamplingContext {
+    if (!this.bridgeCtx) throw new Error('Bridge sampling context is not configured.');
+    return this.bridgeCtx;
+  }
+
   private buildCrossSections(
     path: THREE.Vector3[],
     width: number,
     seed: string,
     irregular: boolean,
+    bridgeBlends: Float32Array,
   ): RoadCrossSection[] {
     const half = width * 0.5;
     const sections: RoadCrossSection[] = [];
@@ -118,9 +171,13 @@ export class RoadMeshBuilder {
       const rightJitter = irregular ? smoothEdgeJitter(seed, i, 1) * CORE_EDGE_JITTER : 0;
       const leftCore = path[i].clone().addScaledVector(normal, half + leftJitter);
       const rightCore = path[i].clone().addScaledVector(normal, -half + rightJitter);
-      leftCore.y = this.terrain.getHeightAt(leftCore.x, leftCore.z) + CORE_Y_OFFSET;
-      rightCore.y = this.terrain.getHeightAt(rightCore.x, rightCore.z) + CORE_Y_OFFSET;
-      sections.push({ leftCore, rightCore, normal });
+      const bridgeBlend = bridgeBlends[i] ?? 0;
+      const centerY = path[i].y;
+      const leftTerrainY = this.terrain.getHeightAt(leftCore.x, leftCore.z) + CORE_Y_OFFSET;
+      const rightTerrainY = this.terrain.getHeightAt(rightCore.x, rightCore.z) + CORE_Y_OFFSET;
+      leftCore.y = THREE.MathUtils.lerp(leftTerrainY, centerY, bridgeBlend);
+      rightCore.y = THREE.MathUtils.lerp(rightTerrainY, centerY, bridgeBlend);
+      sections.push({ leftCore, rightCore, normal, bridgeBlend });
     }
 
     return sections;
@@ -130,9 +187,11 @@ export class RoadMeshBuilder {
     crossSections: RoadCrossSection[],
     path: THREE.Vector3[],
     material: THREE.Material,
+    bridgeBlends: Float32Array,
   ): THREE.Mesh {
     const positions: number[] = [];
     const uvs: number[] = [];
+    const bridgeAttrs: number[] = [];
     const indices: number[] = [];
     const distances = cumulativeDistances(path);
 
@@ -140,6 +199,8 @@ export class RoadMeshBuilder {
       const { leftCore, rightCore } = crossSections[i];
       positions.push(leftCore.x, leftCore.y, leftCore.z, rightCore.x, rightCore.y, rightCore.z);
       uvs.push(0, distances[i] / 5.8, 1, distances[i] / 5.8);
+      const blend = bridgeBlends[i] ?? crossSections[i].bridgeBlend;
+      bridgeAttrs.push(blend, blend);
     }
 
     for (let i = 0; i < path.length - 1; i++) {
@@ -152,6 +213,7 @@ export class RoadMeshBuilder {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setAttribute('uv2', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setAttribute('bridgeBlend', new THREE.Float32BufferAttribute(bridgeAttrs, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, material);
@@ -161,9 +223,9 @@ export class RoadMeshBuilder {
     path: THREE.Vector3[],
     width: number,
     material: THREE.Material,
-    yOffset: number,
+    _yOffset: number,
     seed: string,
-    irregular: boolean
+    irregular: boolean,
   ): THREE.Mesh {
     const positions: number[] = [];
     const uvs: number[] = [];
@@ -177,8 +239,9 @@ export class RoadMeshBuilder {
       const jitter = irregular ? smoothEdgeJitter(seed, i, 0) * CORE_EDGE_JITTER : 0;
       const left = path[i].clone().addScaledVector(normal, half + jitter);
       const right = path[i].clone().addScaledVector(normal, -half + smoothEdgeJitter(seed, i, 1) * (irregular ? CORE_EDGE_JITTER : 0));
-      left.y = this.terrain.getHeightAt(left.x, left.z) + yOffset;
-      right.y = this.terrain.getHeightAt(right.x, right.z) + yOffset;
+      const baseY = path[i].y;
+      left.y = baseY;
+      right.y = baseY;
       positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
       uvs.push(0, distances[i] / 5.8, 1, distances[i] / 5.8);
     }
@@ -207,6 +270,7 @@ export class RoadMeshBuilder {
   ): THREE.Mesh {
     const positions: number[] = [];
     const uvs: number[] = [];
+    const bridgeAttrs: number[] = [];
     const indices: number[] = [];
     const distances = cumulativeDistances(path);
     const pathLen = distances[distances.length - 1] ?? 0;
@@ -215,15 +279,15 @@ export class RoadMeshBuilder {
     const fadeSpan = width * 0.55;
 
     for (let i = 0; i < crossSections.length; i++) {
-      const { leftCore, rightCore, normal } = crossSections[i];
+      const { leftCore, rightCore, normal, bridgeBlend } = crossSections[i];
       const leftOuterJitter = smoothEdgeJitter(seed, i, 2) * 0.52;
       const rightOuterJitter = smoothEdgeJitter(seed, i, 3) * 0.52;
-      const leftInner = this.blendVertexAt(leftCore, normal, -BLEND_INNER_OVERLAP);
-      const rightInner = this.blendVertexAt(rightCore, normal, BLEND_INNER_OVERLAP);
-      const leftMid = this.blendVertexAt(leftCore, normal, shoulderMid + leftOuterJitter * 0.62);
-      const leftFar = this.blendVertexAt(leftCore, normal, shoulderOuter + leftOuterJitter);
-      const rightMid = this.blendVertexAt(rightCore, normal, -(shoulderMid + rightOuterJitter * 0.62));
-      const rightFar = this.blendVertexAt(rightCore, normal, -(shoulderOuter + rightOuterJitter));
+      const leftInner = this.blendVertexAt(leftCore, normal, -BLEND_INNER_OVERLAP, bridgeBlend);
+      const rightInner = this.blendVertexAt(rightCore, normal, BLEND_INNER_OVERLAP, bridgeBlend);
+      const leftMid = this.blendVertexAt(leftCore, normal, shoulderMid + leftOuterJitter * 0.62, bridgeBlend);
+      const leftFar = this.blendVertexAt(leftCore, normal, shoulderOuter + leftOuterJitter, bridgeBlend);
+      const rightMid = this.blendVertexAt(rightCore, normal, -(shoulderMid + rightOuterJitter * 0.62), bridgeBlend);
+      const rightFar = this.blendVertexAt(rightCore, normal, -(shoulderOuter + rightOuterJitter), bridgeBlend);
       for (const p of [leftFar, leftMid, leftInner, rightInner, rightMid, rightFar]) {
         positions.push(p.x, p.y, p.z);
       }
@@ -232,6 +296,7 @@ export class RoadMeshBuilder {
       if (endpointFade.fadeStart) mouthFade = Math.min(mouthFade, smoothFade(distances[i], fadeSpan));
       if (endpointFade.fadeEnd) mouthFade = Math.min(mouthFade, smoothFade(pathLen - distances[i], fadeSpan));
       uvs.push(0, v, 0.42 * mouthFade, v, 1 * mouthFade, v, 1 * mouthFade, v, 0.42 * mouthFade, v, 0, v);
+      for (let j = 0; j < 6; j++) bridgeAttrs.push(bridgeBlend);
     }
 
     for (let i = 0; i < path.length - 1; i++) {
@@ -247,15 +312,22 @@ export class RoadMeshBuilder {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setAttribute('uv2', new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setAttribute('bridgeBlend', new THREE.Float32BufferAttribute(bridgeAttrs, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     return new THREE.Mesh(geometry, this.materials.roadEdge);
   }
 
   /** Re-sample terrain height at the shoulder XZ so sloped edges don't intersect the ground mesh. */
-  private blendVertexAt(core: THREE.Vector3, normal: THREE.Vector3, lateralOffset: number): THREE.Vector3 {
+  private blendVertexAt(
+    core: THREE.Vector3,
+    normal: THREE.Vector3,
+    lateralOffset: number,
+    bridgeBlend: number,
+  ): THREE.Vector3 {
     const point = core.clone().addScaledVector(normal, lateralOffset);
-    point.y = this.terrain.getHeightAt(point.x, point.z) + BLEND_Y_OFFSET;
+    const terrainY = this.terrain.getHeightAt(point.x, point.z) + BLEND_Y_OFFSET;
+    point.y = THREE.MathUtils.lerp(terrainY, core.y + (BRIDGE_Y_OFFSET - CORE_Y_OFFSET) * bridgeBlend, bridgeBlend);
     return point;
   }
 }

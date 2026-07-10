@@ -2,6 +2,7 @@ import type { RoadPlacementFailureReason } from '../roads/RoadPlacementValidatio
 
 export const TOAST_MESSAGES = {
   'road.placement.river': 'A river was in the way',
+  'road.placement.river_too_wide': 'The river is too wide for a wooden bridge',
   'road.placement.rocks': 'Rocks were in the way',
   'road.placement.too_steep': 'The slope is too steep for a road',
 } as const;
@@ -16,6 +17,8 @@ export function roadPlacementReasonToToastId(reason: RoadPlacementFailureReason)
   switch (reason) {
     case 'river':
       return 'road.placement.river';
+    case 'river_too_wide':
+      return 'road.placement.river_too_wide';
     case 'rocks':
       return 'road.placement.rocks';
     case 'too_steep':

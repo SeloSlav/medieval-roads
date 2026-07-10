@@ -13,21 +13,19 @@ import { RoadJunctionBuilder } from '../roads/RoadJunctionBuilder.ts';
 import { RoadMaterialFactory } from '../roads/RoadMaterialFactory.ts';
 import { RoadMeshBuilder } from '../roads/RoadMeshBuilder.ts';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
-import { SkyCloudMesh, loadSkyPerlinTexture } from '../sky/SkyCloudMesh.ts';
+import type { BridgeSamplingContext } from '../roads/RiverBridgeSpans.ts';
+import { getStillWaterSurfaceY } from '../rivers/RiverWaterLevel.ts';
+import { SkyCloudMesh } from '../sky/SkyCloudMesh.ts';
 import { Terrain } from '../terrain/Terrain.ts';
 import { TerrainProjector } from '../terrain/TerrainProjector.ts';
 import { disposeObject3D } from '../utils/dispose.ts';
 import { isRockNearPath } from '../utils/pathGeometry.ts';
-import { loadMossyRockTextures } from '../utils/propTextureLoad.ts';
+import { yieldToMain } from '../utils/yieldToMain.ts';
 import { createPostProcessor, type ScenePostProcessor } from './PostProcessing.ts';
 import { fitDirectionalLightShadow } from './fitDirectionalShadow.ts';
 import { createPreferredRenderer, type RendererBackend, type RendererBackendKind, type SupportedRenderer } from './RendererBackend.ts';
 import { TREE_SHADOW_CAST_LAYER } from './SceneLayers.ts';
-
-type SceneStartupTextures = {
-  riverRock: Awaited<ReturnType<typeof loadMossyRockTextures>>;
-  skyPerlin: THREE.Texture;
-};
+import { applyMaxAnisotropy, beginStartupTextureLoad, type SceneStartupTextures } from './startupTextures.ts';
 
 export class SceneManager {
   private readonly container: HTMLElement;
@@ -61,6 +59,8 @@ export class SceneManager {
     backend: RendererBackend,
     materials: RoadMaterialFactory,
     startupTextures: SceneStartupTextures,
+    terrain: Terrain,
+    riverSystem: RiverSystem,
   ) {
     this.container = container;
     this.renderer = backend.renderer;
@@ -72,13 +72,8 @@ export class SceneManager {
     this.scene.fog = new THREE.FogExp2(0xc8def1, 0.00082);
     this.camera = new THREE.PerspectiveCamera(54, 1, 0.1, 2600);
     this.sunDirection.setFromSphericalCoords(1, THREE.MathUtils.degToRad(43), THREE.MathUtils.degToRad(225));
-    const riverBounds = Terrain.fullBounds();
-    const riverLayout = RiverLayout.create({ bounds: riverBounds });
-    setActiveRiverLayout(riverLayout);
-    const riverField = RiverField.fromLayout({ bounds: riverBounds, layout: riverLayout });
-    this.terrain = new Terrain(materials.createTerrainMaterialWithRiverShore(), riverField);
+    this.terrain = terrain;
     this.terrainProjector = new TerrainProjector(this.terrain, this.camera, this.renderer.domElement);
-    this.roadMeshBuilder = new RoadMeshBuilder(this.terrain, materials);
     this.sky = new SkyCloudMesh({
       sunDirection: this.sunDirection,
       cloudCoverage: 0.3,
@@ -97,12 +92,8 @@ export class SceneManager {
       rendererBackend: backend.kind,
       perlinTexture: startupTextures.skyPerlin,
     });
-    this.riverSystem = createRiverSystem(
-      this.terrain,
-      riverField,
-      materials.riverBank,
-      startupTextures.riverRock,
-    );
+    this.riverSystem = riverSystem;
+    this.roadMeshBuilder = new RoadMeshBuilder(this.terrain, materials, this.getBridgeSamplingContext());
 
     this.roadGroup.name = 'Road network visuals';
     this.junctionGroup.name = 'Road junction visuals';
@@ -126,20 +117,45 @@ export class SceneManager {
     container: HTMLElement,
     onProgress?: (label: string, detail?: string) => void,
     materialsPromise?: Promise<RoadMaterialFactory>,
+    startupTexturesPromise?: Promise<SceneStartupTextures>,
   ): Promise<SceneManager> {
-    onProgress?.('Loading graphics', 'Starting WebGPU renderer and textures');
-    const [backend, materials] = await Promise.all([
+    onProgress?.('Loading graphics', 'Renderer, roads, sky, and river textures');
+    const [backend, materials, startupTextures] = await Promise.all([
       createPreferredRenderer(),
       materialsPromise ?? RoadMaterialFactory.create(8),
+      startupTexturesPromise ?? beginStartupTextureLoad(),
     ]);
+    applyMaxAnisotropy(startupTextures, backend.maxAnisotropy);
     container.appendChild(backend.renderer.domElement);
-    onProgress?.('Loading textures', 'Sky and river surfaces');
-    const [riverRock, skyPerlin] = await Promise.all([
-      loadMossyRockTextures(backend.maxAnisotropy),
-      loadSkyPerlinTexture(),
-    ]);
-    onProgress?.('Building world', 'Terrain, sky, and river');
-    const manager = new SceneManager(container, backend, materials, { riverRock, skyPerlin });
+
+    onProgress?.('Building world', 'River layout and terrain');
+    const riverBounds = Terrain.fullBounds();
+    const riverLayout = RiverLayout.create({ bounds: riverBounds });
+    setActiveRiverLayout(riverLayout);
+    const riverField = RiverField.fromLayout({ bounds: riverBounds, layout: riverLayout });
+    await yieldToMain();
+
+    const terrain = await Terrain.create(
+      materials.createTerrainMaterialWithRiverShore(),
+      riverField,
+      (completedRows, totalRows) => {
+        onProgress?.('Building world', `Shaping terrain (${completedRows}/${totalRows})`);
+      },
+    );
+    await yieldToMain();
+
+    onProgress?.('Building world', 'River water and banks');
+    await yieldToMain();
+    const riverSystem = createRiverSystem(
+      terrain,
+      riverField,
+      materials.riverBank,
+      startupTextures.riverRock,
+    );
+    await yieldToMain();
+
+    onProgress?.('Building world', 'Sky and scene lighting');
+    const manager = new SceneManager(container, backend, materials, startupTextures, terrain, riverSystem);
     void manager.sky.ready.catch((error) => {
       console.warn('Sky volumetric shader still compiling:', error);
     });
@@ -220,18 +236,28 @@ export class SceneManager {
     };
   }
 
+  getBridgeSamplingContext(): BridgeSamplingContext {
+    const { terrain, riverSystem } = this;
+    const riverField = riverSystem.field;
+    return {
+      isWaterAt: (x, z) => riverField.isRenderedWetAt(x, z),
+      getTerrainY: (x, z) => terrain.getHeightAt(x, z),
+      getWaterSurfaceY: (x, z) => getStillWaterSurfaceY(terrain, riverField, x, z),
+    };
+  }
+
   isRoadPathBlocked(path: THREE.Vector3[], roadWidth: number): boolean {
     return this.getRoadPathBlockReason(path, roadWidth) !== null;
   }
 
-  getRoadPathBlockReason(path: THREE.Vector3[], roadWidth: number): 'river' | 'rocks' | null {
+  getRoadPathBlockReason(
+    path: THREE.Vector3[],
+    roadWidth: number,
+    _bridgeCtx?: BridgeSamplingContext,
+  ): 'river' | 'rocks' | null {
     if (path.length < 2) return null;
     const sampled = this.roadMeshBuilder.samplePath(path, 1.25);
     if (sampled.length < 2) return null;
-
-    for (const point of sampled) {
-      if (this.riverSystem.isBlockedAt(point.x, point.z)) return 'river';
-    }
 
     const roadHalfWidth = roadWidth * 0.5;
     for (const rock of this.forestManager?.rockPlacements ?? []) {
@@ -242,6 +268,22 @@ export class SceneManager {
     }
 
     return null;
+  }
+
+  sampleRoadDeckY(x: number, z: number): number | null {
+    const network = this.roadNetworkRef;
+    if (!network) return null;
+
+    let best: number | null = null;
+    for (const edge of network.edges.values()) {
+      const path = edge.sampledPath.length >= 2 ? edge.sampledPath : edge.controlPoints;
+      if (path.length < 2) continue;
+
+      const projection = projectPointToPathXZ(x, z, path);
+      if (projection.distance > edge.width * 0.52) continue;
+      best = best == null ? projection.y : Math.max(best, projection.y);
+    }
+    return best;
   }
 
   syncRoadNetwork(network: RoadNetwork): void {
@@ -353,4 +395,29 @@ export class SceneManager {
     this.scene.add(blueFill);
   }
 
+}
+
+function projectPointToPathXZ(
+  x: number,
+  z: number,
+  path: THREE.Vector3[],
+): { distance: number; y: number } {
+  let bestDistance = Infinity;
+  let bestY = path[0].y;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const abx = b.x - a.x;
+    const abz = b.z - a.z;
+    const lengthSq = abx * abx + abz * abz;
+    const t = lengthSq <= 1e-6 ? 0 : THREE.MathUtils.clamp(((x - a.x) * abx + (z - a.z) * abz) / lengthSq, 0, 1);
+    const px = a.x + abx * t;
+    const pz = a.z + abz * t;
+    const distance = Math.hypot(x - px, z - pz);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestY = THREE.MathUtils.lerp(a.y, b.y, t);
+    }
+  }
+  return { distance: bestDistance, y: bestY };
 }

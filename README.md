@@ -1,8 +1,8 @@
 # City Builder Starter Kit - ThreeJS
 
-A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D landscape. Build road networks across rolling hills, pine forests, and winding rivers — then drop into first-person walk mode to explore the world on foot. Features terrain-aware road placement, junction generation, animated water, streamed grass LOD, and a contextual builder HUD for prototyping game-world paths.
+A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D landscape. Build road networks across rolling hills, pine forests, and winding rivers — wooden bridges and graded ramps appear automatically when a path crosses water. Drop into first-person walk mode to explore the world on foot. Features terrain-aware road placement, junction generation, animated water, streamed grass LOD, and a contextual builder HUD for prototyping game-world paths.
 
-![Road builder UI with dirt roads crossing a river and forest](docs/screenshots/medieval-roads-river-builder.png)
+![Road network with wooden bridges, ramps, and forest](docs/screenshots/medieval-roads-bridges-forest.png)
 
 ## Features
 
@@ -19,6 +19,10 @@ A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D 
 - Live road preview while drawing, plus selection and delete with confirmation popup.
 - Undo last placed point, undo last committed change, and full draft cancel.
 - Terrain road-wear blending that tints grass to packed dirt along committed road corridors.
+- Automatic river bridge generation when a road crosses water — graded approach ramps, elevated deck, and instanced support posts.
+- Wood-log bridge deck material blended onto the road ribbon via a per-vertex `bridgeBlend` attribute.
+- Bridge preview tint while drawing, plus placement validation that rejects spans wider than the max bridge length.
+- Rock collision checks that block roads through scattered forest and river-shore boulders.
 
 ### Exploration
 
@@ -27,6 +31,7 @@ A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D 
 - Free-look while holding `Alt` — look around without turning the body; view recenters on release.
 - Scrolling compass HUD with cardinal and intercardinal labels while walking.
 - Seamless handoff between RTS orbit camera and walk mode via `~` (backtick).
+- Walk locomotion samples road deck height so you can traverse built roads and bridges on foot.
 
 ### Landscape & environment
 
@@ -36,7 +41,7 @@ A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D 
 - Procedural river layout with multiple source corridors, tributaries, and a central confluence drain.
 - Animated river water using a 2D virtual-pipes simulation with foam, shore lap, and alpha feathering.
 - Organic river shore SDF fields for natural bank shapes and terrain mud tinting.
-- Scatter-placed river shore stones along bank edges.
+- Scatter-placed river shore stones along bank edges, with procedural shore-crossing gaps that clear stones for natural ford points.
 - Instanced conifer forest with narrow, broad, and young tree forms plus scattered rocks and outcrops.
 - Forest undergrowth — instanced bushes and ferns scattered in dense woodland pockets.
 - Streamed 3D grass blade tufts with camera-relative LOD, zoom-gated reveal, and road clearance.
@@ -53,7 +58,7 @@ A real-time Three.js sandbox for drawing medieval dirt roads on a procedural 3D 
 - Progressive loading screen with staged status labels while the world initializes.
 - Contextual tip cards for camera, walk, and road modes — toggle off via the game menu.
 - Game menu with persistent "turn off tips" preference stored in `localStorage`.
-- Toast notifications for rejected road placements (steep slope, too short, etc.).
+- Toast notifications for rejected road placements (steep slope, river too wide, rocks in the way, etc.).
 - HUD with floating road/build tool buttons, live FPS and zoom readout, and compass strip.
 - Responsive full-screen canvas built with Vite, TypeScript, and Three.js r185.
 
@@ -124,7 +129,7 @@ src/
   input/      Keyboard and pointer state helpers
   props/      Instanced forest, undergrowth, stumps, rocks, road clearance, shadow filters
   rivers/     River layout, field sampling, water sim, banks, reeds, and shore stones
-  roads/      Road graph, drawing tool, mesh generation, junctions, materials
+  roads/      Road graph, drawing tool, mesh generation, junctions, bridges, materials
   scene/      Three.js scene, renderer backend, lighting, post-processing
   sky/        Animated sky/cloud mesh
   terrain/    Procedural heightfield, grass materials, road wear, ray projection
@@ -133,7 +138,8 @@ src/
 public/
   assets/     Terrain, road, prop, and third-party texture assets
 scripts/
-  derive_pbr_maps.py  Utility script for derived texture maps
+  derive_pbr_maps.py           Utility script for derived texture maps
+  generate_wood_logs_texture.py  Procedural wood-log bridge albedo generator
 docs/
   screenshots/ Project screenshots used by this README
 ```
@@ -148,13 +154,15 @@ Road placement is handled by `src/roads/RoadTool.ts`. Pointer input is projected
 
 `src/roads/RoadNetwork.ts` stores roads as nodes and edges. It resolves endpoint snapping, splits existing road segments when new paths connect into them, detects crossings, prunes orphan nodes, and classifies junction types.
 
-`src/roads/RoadMeshBuilder.ts` turns road graph edges into terrain-following ribbon meshes. It samples Catmull-Rom curves, builds a core dirt ribbon, adds irregular blended shoulders, and keeps the road slightly above the terrain to avoid z-fighting. `RoadJunctionBuilder.ts` adds endpoint caps and junction patch geometry at classified nodes.
+`src/roads/RoadMeshBuilder.ts` turns road graph edges into terrain-following ribbon meshes. It samples Catmull-Rom curves, builds a core dirt ribbon, adds irregular blended shoulders, and keeps the road slightly above the terrain to avoid z-fighting. When a path crosses water, `RiverBridgeSpans.ts` detects wet runs, raises the deck above the water surface, and blends graded approach ramps; `BridgeSupports.ts` places instanced posts under the deck. `RoadJunctionBuilder.ts` adds endpoint caps and junction patch geometry at classified nodes.
+
+`RoadPlacementValidation.ts` checks slope, minimum length, max bridge span, and rock collisions before commit. `RiverShoreCrossingGaps.ts` seeds procedural clearance zones along river banks so shore stones skip natural crossing points.
 
 `src/props/ForestProps.ts`, `ForestUndergrowth.ts`, and `ForestManager.ts` scatter instanced conifer trees, bushes, ferns, and rocks across the playable area, skipping rivers and clearing trees near committed road edges. `RoadStumps.ts` places cut stumps along road shoulders after clearance. `RiverReeds.ts` adds instanced reed clusters along river banks.
 
 `src/grass/GrassBladeField.ts` streams instanced 3D grass tufts in camera-relative chunks. Tufts fade in at close zoom (aligned with the terrain dirt LOD band) and are cleared near committed roads. `TerrainRoadWear.ts` updates a per-vertex `roadWearBlend` attribute so the TSL grass material tints to packed dirt along road corridors.
 
-`src/camera/CameraController.ts` drives the RTS orbit camera with smooth pan, rotate, and zoom (displayed as a percentage in the HUD). `FirstPersonController.ts` handles walk mode — pointer-lock look, terrain-sampled foot placement, sprint/jump/crouch, free-look, camera bob, and compass heading publication.
+`src/camera/CameraController.ts` drives the RTS orbit camera with smooth pan, rotate, and zoom (displayed as a percentage in the HUD). `FirstPersonController.ts` handles walk mode — pointer-lock look, terrain- and road-deck-sampled foot placement, sprint/jump/crouch, free-look, camera bob, and compass heading publication.
 
 `src/ui/BuildToolbar.ts` composes the HUD: tool buttons, contextual tip cards, FPS/zoom stats, compass strip, delete popup, and game menu. `ToastManager.ts` surfaces placement validation errors. `LoadingScreen.ts` shows staged progress during world bootstrap.
 
@@ -170,7 +178,7 @@ Road placement is handled by `src/roads/RoadTool.ts`. Pointer input is projected
 
 ## Assets
 
-Texture assets are stored under `public/assets/textures`. The road surface uses a medieval dirt texture set with albedo, normal, roughness, ambient occlusion, height, rut mask, and edge mask maps. Terrain uses multiple manor grass PBR sets (meadow, dense, dry, blend) and prop textures for pine foliage and rocks. Everything is loaded locally at runtime — no backend or external asset service required.
+Texture assets are stored under `public/assets/textures`. The road surface uses a medieval dirt texture set with albedo, normal, roughness, ambient occlusion, height, rut mask, and edge mask maps. River bridge decks use a separate wood-log PBR set (procedurally generated via `scripts/generate_wood_logs_texture.py`). Terrain uses multiple manor grass PBR sets (meadow, dense, dry, blend) and prop textures for pine foliage and rocks. Everything is loaded locally at runtime — no backend or external asset service required.
 
 ## Development Notes
 

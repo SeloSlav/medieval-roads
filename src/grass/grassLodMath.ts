@@ -32,6 +32,22 @@ export const GRASS_BLADE_REVEAL = {
   far: TERRAIN_DIRT_FAR_DISTANCE,
 } as const;
 
+/** River reeds are fully visible at this zoom and beyond (earlier than grass tufts). */
+export const REED_REVEAL_ZOOM_PERCENT = 300;
+
+/** Reeds begin appearing above this zoom; below ~195% they stay hidden. */
+export const REED_FADE_START_ZOOM_PERCENT = 200;
+
+/** Slower than dirt/grass easing so reeds ease in over a wider zoom band. */
+export const REED_BLEND_EASE = 1.9;
+
+/** Orbit distances for the reed zoom band (outer edge sits just below 200% for a clean cutoff). */
+export const REED_CLOSE_DISTANCE =
+  BASELINE_CAMERA_DISTANCE / (REED_REVEAL_ZOOM_PERCENT / 100);
+
+export const REED_FAR_DISTANCE =
+  BASELINE_CAMERA_DISTANCE / ((REED_FADE_START_ZOOM_PERCENT - 5) / 100);
+
 /** Horizontal radius where 3D grass tufts render — fades before dirt ends. */
 export const GRASS_BLADE_NEAR_RADIUS = 54;
 
@@ -68,6 +84,17 @@ export function dirtZoomGate(cameraDistance: number): number {
 
 export function grassBladeRevealOpacity(cameraDistance: number): number {
   return dirtZoomGate(cameraDistance);
+}
+
+/** 0 below ~200% zoom → 1 at 300% zoom; reeds ease in before grass tufts. */
+export function reedRevealOpacity(cameraDistance: number): number {
+  const t = smoothstep(REED_CLOSE_DISTANCE, REED_FAR_DISTANCE, cameraDistance);
+  return Math.pow(1 - t, REED_BLEND_EASE);
+}
+
+export function resolveReedLod(cameraDistance: number, firstPersonActive: boolean): number {
+  if (firstPersonActive) return 1;
+  return reedRevealOpacity(cameraDistance);
 }
 
 /** First-person mode always uses full close grass/dirt LOD around the player. */

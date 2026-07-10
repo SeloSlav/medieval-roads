@@ -15,13 +15,15 @@ import {
   pow,
   screenUV,
   sin,
-  smoothstep,
   sub,
+  texture,
   time,
+  vec2,
   vec3,
   viewportSafeUV,
   viewportSharedTexture,
 } from 'three/tsl';
+import type { RiverWaterShoreMaps } from './riverWaterShoreMaps.ts';
 
 type TslNode = {
   add(value: TslNode | number): TslNode;
@@ -33,6 +35,8 @@ type TslNode = {
   x: TslNode;
   z: TslNode;
   xy: TslNode;
+  r: TslNode;
+  g: TslNode;
   rgb: TslNode;
 };
 
@@ -43,13 +47,23 @@ const DEEP_WATER_TINT = vec3(0.08, 0.17, 0.15) as TslNode;
 const SHORE_LAP_MAX = 0.11;
 const SHORE_FOAM_MAX = 0.72;
 
-function buildRiverWaterShaderNodes() {
-  const foamBaseAttr = attribute('foamBase', 'float') as TslNode;
-  const featherAttr = attribute('featherAlpha', 'float') as TslNode;
+function buildWorldShoreUv(maps: RiverWaterShoreMaps): TslNode {
+  const world = positionWorld as TslNode;
+  return vec2(
+    world.x.sub(float(maps.originX) as TslNode).mul(float(maps.invSpanX) as TslNode),
+    world.z.sub(float(maps.originZ) as TslNode).mul(float(maps.invSpanZ) as TslNode),
+  ) as TslNode;
+}
+
+function buildRiverWaterShaderNodes(shoreMaps: RiverWaterShoreMaps) {
   const simDeltaAttr = attribute('simDelta', 'float') as TslNode;
   const position = positionLocal as TslNode;
   const worldPos = positionWorld as TslNode;
   const frameTime = time as TslNode;
+
+  const shoreSample = texture(shoreMaps.shoreTexture, buildWorldShoreUv(shoreMaps)) as TslNode;
+  const featherSample = shoreSample.r;
+  const foamBaseAttr = shoreSample.g;
 
   const wx = position.x;
   const wz = position.z;
@@ -139,13 +153,7 @@ function buildRiverWaterShaderNodes() {
     pow(shoreMask, float(1.55) as TslNode) as TslNode,
   ) as TslNode;
 
-  const edgeWobble = (sin(wx.mul(0.07).add(wz.mul(0.05)).add(frameTime.mul(0.55)) as TslNode) as TslNode)
-    .mul(0.035)
-    .mul(shoreMask) as TslNode;
-  const animatedFeather = pow(
-    smoothstep(float(0) as TslNode, float(1) as TslNode, featherAttr.add(edgeWobble) as TslNode) as TslNode,
-    float(0.92) as TslNode,
-  ) as TslNode;
+  const animatedFeather = pow(featherSample, float(0.92) as TslNode) as TslNode;
   const volumeOpacity = mix(float(0.42) as TslNode, float(0.68) as TslNode, depthFactor) as TslNode;
   const surfaceFilm = shoreMask.mul(float(0.24) as TslNode) as TslNode;
   const opacityNode = animatedFeather.mul(
@@ -164,11 +172,14 @@ function buildRiverWaterShaderNodes() {
 }
 
 let sharedWaterMaterial: MeshPhysicalNodeMaterial | null = null;
+let sharedShoreMaps: RiverWaterShoreMaps | null = null;
 
-export function getSharedRiverWaterMaterial(): MeshPhysicalNodeMaterial {
-  if (sharedWaterMaterial) return sharedWaterMaterial;
+export function getSharedRiverWaterMaterial(shoreMaps: RiverWaterShoreMaps): MeshPhysicalNodeMaterial {
+  if (sharedWaterMaterial && sharedShoreMaps === shoreMaps) return sharedWaterMaterial;
 
-  const nodes = buildRiverWaterShaderNodes();
+  disposeSharedRiverWaterMaterial();
+
+  const nodes = buildRiverWaterShaderNodes(shoreMaps);
   const material = new MeshPhysicalNodeMaterial();
   material.name = 'RiverWaterMaterial';
   material.color.set(0xffffff);
@@ -196,10 +207,12 @@ export function getSharedRiverWaterMaterial(): MeshPhysicalNodeMaterial {
   material.thicknessNode = nodes.thicknessNode;
   material.specularIntensityNode = nodes.specularIntensityNode;
   sharedWaterMaterial = material;
+  sharedShoreMaps = shoreMaps;
   return sharedWaterMaterial;
 }
 
 export function disposeSharedRiverWaterMaterial(): void {
   sharedWaterMaterial?.dispose();
   sharedWaterMaterial = null;
+  sharedShoreMaps = null;
 }

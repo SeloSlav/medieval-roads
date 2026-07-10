@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import type { SceneManager } from '../scene/SceneManager.ts';
+import {
+  MAX_BRIDGE_SPAN_LENGTH,
+  maxWetRunLength,
+} from './RiverBridgeSpans.ts';
 
-export type RoadPlacementFailureReason = 'river' | 'rocks' | 'too_steep' | 'too_short';
+export type RoadPlacementFailureReason = 'river' | 'river_too_wide' | 'rocks' | 'too_steep' | 'too_short';
 
 export type RoadPlacementResult =
   | { ok: true }
@@ -24,7 +28,12 @@ export function validateRoadPlacement(
     if (dxz > 0.1 && dy / dxz > MAX_SEGMENT_SLOPE) return { ok: false, reason: 'too_steep' };
   }
 
-  const blockReason = sceneManager.getRoadPathBlockReason(points, roadWidth);
+  const bridgeCtx = sceneManager.getBridgeSamplingContext();
+  const sampled = sceneManager.roadMeshBuilder.samplePath(points, 1.25);
+  const wetSpan = maxWetRunLength(sampled, bridgeCtx.isWaterAt);
+  if (wetSpan > MAX_BRIDGE_SPAN_LENGTH) return { ok: false, reason: 'river_too_wide' };
+
+  const blockReason = sceneManager.getRoadPathBlockReason(points, roadWidth, bridgeCtx);
   if (blockReason) return { ok: false, reason: blockReason };
 
   return { ok: true };

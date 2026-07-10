@@ -10,7 +10,7 @@ export type RoadNetworkSnapshot = {
   nextNodeId: number;
   nextEdgeId: number;
   nodes: Array<{ id: string; position: [number, number, number] }>;
-  edges: Array<{
+    edges: Array<{
     id: string;
     startNodeId: string;
     endNodeId: string;
@@ -19,6 +19,13 @@ export type RoadNetworkSnapshot = {
     sampledPath: Array<[number, number, number]>;
     length: number;
     revision: number;
+    bridgeSpans?: Array<{
+      rampStart: number;
+      deckStart: number;
+      deckEnd: number;
+      rampEnd: number;
+      deckY: number;
+    }>;
   }>;
 };
 
@@ -143,6 +150,7 @@ export class RoadNetwork {
         sampledPath: edge.sampledPath.map(vectorToTuple),
         length: edge.length,
         revision: edge.revision,
+        bridgeSpans: edge.materialData?.bridgeSpans,
       })),
     };
   }
@@ -170,7 +178,10 @@ export class RoadNetwork {
         sampledPath: edge.sampledPath.map(tupleToVector),
         length: edge.length,
         editableState: 'normal',
-        materialData: { surface: 'medieval_dirt' },
+        materialData: {
+          surface: 'medieval_dirt',
+          bridgeSpans: edge.bridgeSpans,
+        },
         revision: edge.revision,
       });
       this.nodes.get(edge.startNodeId)?.edgeIds.add(edge.id);

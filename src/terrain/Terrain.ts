@@ -1,6 +1,7 @@
 ﻿import * as THREE from 'three';
 import type { RiverField } from '../rivers/RiverField.ts';
 import { sampleBaseTerrainHeight } from './TerrainHeight.ts';
+import { yieldToMain } from '../utils/yieldToMain.ts';
 
 export type TerrainBounds = {
   minX: number;
@@ -8,6 +9,8 @@ export type TerrainBounds = {
   minZ: number;
   maxZ: number;
 };
+
+const TERRAIN_ROWS_PER_YIELD = 40;
 
 export class Terrain {
   readonly size = 1080;
@@ -22,10 +25,18 @@ export class Terrain {
     return { minX: -half, maxX: half, minZ: -half, maxZ: half };
   }
 
-  constructor(material: THREE.Material, riverField?: RiverField) {
+  static async create(
+    material: THREE.Material,
+    riverField?: RiverField,
+    onProgress?: (completedRows: number, totalRows: number) => void,
+  ): Promise<Terrain> {
+    const geometry = await Terrain.buildGeometryAsync(riverField, onProgress);
+    return new Terrain(material, geometry);
+  }
+
+  private constructor(material: THREE.Material, geometry: THREE.BufferGeometry) {
     const half = this.playableSize * 0.5;
     this.bounds = { minX: -half, maxX: half, minZ: -half, maxZ: half };
-    const geometry = this.createGeometry(riverField);
     this.dirtZoomGateAttr = geometry.getAttribute('dirtZoomGate') as THREE.BufferAttribute;
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.name = 'Continuous terrain heightfield';
@@ -64,56 +75,93 @@ export class Terrain {
     }
   }
 
-  private createGeometry(riverField?: RiverField): THREE.BufferGeometry {
-    const positions: number[] = [];
-    const uvs: number[] = [];
-    const colors: number[] = [];
-    const shoreBlends: number[] = [];
-    const roadWearBlends: number[] = [];
-    const dirtZoomGates: number[] = [];
-    const indices: number[] = [];
-    const step = this.size / (this.resolution - 1);
-    const half = this.size * 0.5;
+  private static async buildGeometryAsync(
+    riverField: RiverField | undefined,
+    onProgress?: (completedRows: number, totalRows: number) => void,
+  ): Promise<THREE.BufferGeometry> {
+    const resolution = 769;
+    const size = 1080;
+    const vertexCount = resolution * resolution;
+    const positions = new Float32Array(vertexCount * 3);
+    const uvs = new Float32Array(vertexCount * 2);
+    const colors = new Float32Array(vertexCount * 3);
+    const shoreBlends = new Float32Array(vertexCount);
+    const roadWearBlends = new Float32Array(vertexCount);
+    const dirtZoomGates = new Float32Array(vertexCount);
+    const step = size / (resolution - 1);
+    const half = size * 0.5;
+    const builder = new TerrainVertexBuilder();
 
-    for (let zIndex = 0; zIndex < this.resolution; zIndex++) {
-      for (let xIndex = 0; xIndex < this.resolution; xIndex++) {
+    for (let zIndex = 0; zIndex < resolution; zIndex++) {
+      const rowOffset = zIndex * resolution;
+      for (let xIndex = 0; xIndex < resolution; xIndex++) {
+        const vertexIndex = rowOffset + xIndex;
         const x = -half + xIndex * step;
         const z = -half + zIndex * step;
-        positions.push(x, this.getHeightAt(x, z), z);
-        const uv = this.getTerrainUv(x, z);
-        uvs.push(uv.x, uv.y);
-        colors.push(...this.getTerrainBlendWeights(x, z));
-        shoreBlends.push(riverField?.sampleMudBlendAt(x, z) ?? 0);
-        roadWearBlends.push(0);
-        dirtZoomGates.push(0);
+        const positionOffset = vertexIndex * 3;
+        positions[positionOffset] = x;
+        positions[positionOffset + 1] = sampleBaseTerrainHeight(x, z);
+        positions[positionOffset + 2] = z;
+
+        const uv = builder.getTerrainUv(x, z);
+        const uvOffset = vertexIndex * 2;
+        uvs[uvOffset] = uv[0];
+        uvs[uvOffset + 1] = uv[1];
+
+        const weights = builder.getTerrainBlendWeights(x, z);
+        const colorOffset = vertexIndex * 3;
+        colors[colorOffset] = weights[0];
+        colors[colorOffset + 1] = weights[1];
+        colors[colorOffset + 2] = weights[2];
+
+        shoreBlends[vertexIndex] = riverField?.sampleMudBlendAt(x, z) ?? 0;
+        roadWearBlends[vertexIndex] = 0;
+        dirtZoomGates[vertexIndex] = 0;
+      }
+
+      onProgress?.(zIndex + 1, resolution);
+      if ((zIndex + 1) % TERRAIN_ROWS_PER_YIELD === 0) {
+        await yieldToMain();
       }
     }
 
-    for (let zIndex = 0; zIndex < this.resolution - 1; zIndex++) {
-      for (let xIndex = 0; xIndex < this.resolution - 1; xIndex++) {
-        const a = zIndex * this.resolution + xIndex;
+    const quadCount = (resolution - 1) * (resolution - 1);
+    const indices = new Uint32Array(quadCount * 6);
+    let indexOffset = 0;
+    for (let zIndex = 0; zIndex < resolution - 1; zIndex++) {
+      for (let xIndex = 0; xIndex < resolution - 1; xIndex++) {
+        const a = zIndex * resolution + xIndex;
         const b = a + 1;
-        const c = a + this.resolution;
+        const c = a + resolution;
         const d = c + 1;
-        indices.push(a, c, b, b, c, d);
+        indices[indexOffset++] = a;
+        indices[indexOffset++] = c;
+        indices[indexOffset++] = b;
+        indices[indexOffset++] = b;
+        indices[indexOffset++] = c;
+        indices[indexOffset++] = d;
       }
     }
+
+    await yieldToMain();
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setIndex(indices);
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setAttribute('uv2', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setAttribute('shoreBlend', new THREE.Float32BufferAttribute(shoreBlends, 1));
-    geometry.setAttribute('roadWearBlend', new THREE.Float32BufferAttribute(roadWearBlends, 1));
-    geometry.setAttribute('dirtZoomGate', new THREE.Float32BufferAttribute(dirtZoomGates, 1));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setAttribute('uv2', new THREE.BufferAttribute(uvs, 2));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('shoreBlend', new THREE.BufferAttribute(shoreBlends, 1));
+    geometry.setAttribute('roadWearBlend', new THREE.BufferAttribute(roadWearBlends, 1));
+    geometry.setAttribute('dirtZoomGate', new THREE.BufferAttribute(dirtZoomGates, 1));
     geometry.computeVertexNormals();
     geometry.computeBoundingSphere();
     return geometry;
   }
+}
 
-  private getTerrainBlendWeights(x: number, z: number): [number, number, number] {
+class TerrainVertexBuilder {
+  getTerrainBlendWeights(x: number, z: number): [number, number, number] {
     const warpX = this.fbm(x * 0.006 + 41.1, z * 0.006 - 17.8, 4) * 22;
     const warpZ = this.fbm(x * 0.006 - 12.5, z * 0.006 + 73.2, 4) * 22;
     const wx = x + warpX;
@@ -129,19 +177,19 @@ export class Terrain {
     return [rawMeadow / sum, rawDense / sum, rawDry / sum];
   }
 
-  private getTerrainUv(x: number, z: number): THREE.Vector2 {
+  getTerrainUv(x: number, z: number): [number, number] {
     const scale = 48;
     const rotatedX = x * 0.67 - z * 0.74;
     const rotatedZ = x * 0.74 + z * 0.67;
     const warpX = this.fbm(x * 0.0048 + 13.2, z * 0.0048 - 7.4, 4) * 0.38 + this.fbm(x * 0.018 - 71.5, z * 0.018 + 19.8, 3) * 0.055;
     const warpZ = this.fbm(x * 0.0053 - 28.6, z * 0.0053 + 44.1, 4) * 0.38 + this.fbm(x * 0.016 + 53.7, z * 0.016 - 38.2, 3) * 0.055;
-    return new THREE.Vector2(rotatedX / scale + warpX, rotatedZ / (scale * 1.17) + warpZ);
+    return [rotatedX / scale + warpX, rotatedZ / (scale * 1.17) + warpZ];
   }
 
   private getEdgeHillFactor(x: number, z: number): number {
     const edgeDistance = Math.max(Math.abs(x), Math.abs(z));
-    const hillStart = this.playableSize * 0.44;
-    const hillEnd = this.size * 0.5;
+    const hillStart = 820 * 0.44;
+    const hillEnd = 1080 * 0.5;
     return this.smoothstep(hillStart, hillEnd, edgeDistance);
   }
 
