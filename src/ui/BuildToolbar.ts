@@ -320,9 +320,9 @@ export class BuildToolbar {
   }
 
   private describeStatus(stats: ToolbarStats): string {
-    if (stats.mode === 'lumber_mill') return 'Click terrain to place a lumber mill';
-    if (stats.mode === 'reforester') return 'Click terrain to place a reforester';
-    if (stats.mode === 'stone_quarry') return 'Click terrain to place a stone quarry';
+    if (stats.mode === 'lumber_mill') return 'Click terrain to place a lumber mill (one at a time)';
+    if (stats.mode === 'reforester') return 'Click terrain to place a reforester (one at a time)';
+    if (stats.mode === 'stone_quarry') return 'Click terrain to place a stone quarry (one at a time)';
     if (stats.mode !== 'road') return 'Road tool off';
     if (stats.canBuild) return 'Ready to build';
     if (stats.hasDraft) return 'Add more points';

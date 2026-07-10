@@ -31,7 +31,7 @@ import { beginStartupTextureLoad } from '../scene/startupTextures.ts';
 import { BuildToolbar, type ToolbarStats } from '../ui/BuildToolbar.ts';
 import { LoadingScreen } from '../ui/LoadingScreen.ts';
 import { ToastManager } from '../ui/ToastManager.ts';
-import { roadPlacementReasonToToastId } from '../ui/toastMessages.ts';
+import { roadPlacementReasonToToastId, buildingPlacementReasonToToastId } from '../ui/toastMessages.ts';
 
 const TARGET_MAX_FPS = 90;
 const TARGET_FRAME_MS = 1000 / TARGET_MAX_FPS;
@@ -168,7 +168,6 @@ export class App {
       onPlaced: (state) => {
         this.gameState = state;
         this.syncResourceUi();
-        this.syncToolbar();
       },
       onPlaceBuilding: async (kind, x, z) => {
         if (this.spacetimeConnected && this.spacetimeStore) {
@@ -180,7 +179,12 @@ export class App {
         this.gameState = result.state;
         buildingMarkers.syncBuildings(result.state.buildings.values());
         this.syncResourceUi();
-        this.syncToolbar();
+      },
+      isWaterAt: (x, z) => sceneManager.riverField.isRenderedWetAt(x, z),
+      getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
+      onModeChanged: () => this.syncToolbar(),
+      onPlacementRejected: (reason) => {
+        this.toastManager?.showMessageId(buildingPlacementReasonToToastId(reason), { variant: 'error' });
       },
       isBlocked: () =>
         roadTool.isEnabled()
@@ -356,6 +360,7 @@ export class App {
       this.firstPersonController?.update(dt);
       this.toolbar?.setFirstPersonMode(true);
       this.roadTool?.update(dt);
+      this.buildingTool?.update();
       this.updateBuildButtonPosition();
       this.sceneManager?.render(dt, 12, true);
     } else {
@@ -363,6 +368,7 @@ export class App {
       this.toolbar?.setFirstPersonMode(false);
       this.toolbar?.setZoomPercent(this.cameraController?.getZoomPercent() ?? 100);
       this.roadTool?.update(dt);
+      this.buildingTool?.update();
       this.updateBuildButtonPosition();
       this.sceneManager?.render(dt, this.cameraController?.getOrbitDistance());
     }

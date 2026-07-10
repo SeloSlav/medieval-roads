@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import { disposeObject3D } from '../utils/dispose.ts';
-import type { BuildingState } from '../resources/types.ts';
+import type { BuildingKind, BuildingState } from '../resources/types.ts';
 import type { Terrain } from '../terrain/Terrain.ts';
 import { createBuildingMesh } from './BuildingMeshes.ts';
+import {
+  createBuildingPreviewMesh,
+  disposeBuildingPreviewMesh,
+  updateBuildingPreviewAppearance,
+} from './BuildingPlacementPreview.ts';
 
 type BuildingMarkersOptions = {
   terrain: Terrain;
@@ -15,6 +20,8 @@ export class BuildingMarkers {
   private readonly buildingMeshes = new Map<string, THREE.Group>();
   private readonly radiusMeshes = new Map<string, THREE.Mesh>();
   private previewMesh: THREE.Mesh | null = null;
+  private previewBuilding: THREE.Group | null = null;
+  private previewKind: BuildingKind | null = null;
 
   constructor(options: BuildingMarkersOptions) {
     this.terrain = options.terrain;
@@ -35,27 +42,65 @@ export class BuildingMarkers {
     }
   }
 
-  setPlacementPreview(x: number, z: number, radius: number, visible: boolean): void {
+  clearPlacementPreview(): void {
+    if (this.previewMesh) this.previewMesh.visible = false;
+    if (this.previewBuilding) this.previewBuilding.visible = false;
+  }
+
+  setPlacementPreview(
+    kind: BuildingKind,
+    x: number,
+    z: number,
+    radius: number,
+    valid: boolean,
+    visible: boolean,
+  ): void {
     if (!visible) {
       if (this.previewMesh) this.previewMesh.visible = false;
+      if (this.previewBuilding) this.previewBuilding.visible = false;
       return;
     }
 
+    const ringColor = valid ? 0x00cc66 : 0xff4444;
     if (!this.previewMesh) {
-      this.previewMesh = createRadiusRing(0x84a66b, 0.28);
+      this.previewMesh = createRadiusRing(ringColor, 0.22);
       this.group.add(this.previewMesh);
+    } else {
+      (this.previewMesh.material as THREE.MeshBasicMaterial).color.setHex(ringColor);
     }
 
-    const y = this.terrain.getHeightAt(x, z) + 0.2;
+    if (!this.previewBuilding || this.previewKind !== kind) {
+      if (this.previewBuilding) {
+        disposeBuildingPreviewMesh(this.previewBuilding);
+        this.previewBuilding.removeFromParent();
+      }
+      this.previewBuilding = createBuildingPreviewMesh(kind);
+      this.previewKind = kind;
+      this.previewBuilding.rotation.y = buildingPlacementYaw(x, z);
+      this.group.add(this.previewBuilding);
+    } else {
+      updateBuildingPreviewAppearance(this.previewBuilding, valid);
+    }
+
+    const y = this.terrain.getHeightAt(x, z);
     this.previewMesh.visible = true;
-    this.previewMesh.position.set(x, y, z);
+    this.previewMesh.position.set(x, y + 0.2, z);
     this.previewMesh.scale.set(radius, 1, radius);
+
+    this.previewBuilding.visible = true;
+    this.previewBuilding.rotation.y = buildingPlacementYaw(x, z);
+    this.previewBuilding.position.set(x, y, z);
   }
 
   dispose(): void {
     if (this.previewMesh) {
       disposeObject3D(this.previewMesh);
       this.previewMesh = null;
+    }
+    if (this.previewBuilding) {
+      disposeBuildingPreviewMesh(this.previewBuilding);
+      this.previewBuilding = null;
+      this.previewKind = null;
     }
     for (const id of [...this.buildingMeshes.keys()]) {
       this.removeBuilding(id);
