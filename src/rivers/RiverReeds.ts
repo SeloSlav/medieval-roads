@@ -128,11 +128,12 @@ export function createRiverReeds(
       cameraDistance: number,
       firstPersonActive = false,
     ) {
-      const reedOpacity = resolveReedLod(cameraDistance, firstPersonActive) * REED_PEAK_OPACITY;
-      const reedZoomVisible = reedOpacity > 0.02 && placements.length > 0;
+      const reedLod = resolveReedLod(cameraDistance, firstPersonActive);
+      const reedOpacity = reedLod * REED_PEAK_OPACITY;
+      const reedZoomVisible = reedLod > 0.001 && placements.length > 0;
       mesh.visible = reedZoomVisible;
 
-      if (!Number.isFinite(lastMaterialOpacity) || Math.abs(reedOpacity - lastMaterialOpacity) > 0.008) {
+      if (!Number.isFinite(lastMaterialOpacity) || Math.abs(reedOpacity - lastMaterialOpacity) > 0.004) {
         lastMaterialOpacity = reedOpacity;
         material.opacity = reedOpacity;
         const useTransparency = reedOpacity < 0.995;
