@@ -1,14 +1,59 @@
 import type { Terrain } from '../terrain/Terrain.ts';
 import type { RiverField } from '../rivers/RiverField.ts';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
-import type { GameState, InspectableTarget, QuarryNodeState } from './types.ts';
+import type { GameState, InspectableTarget, QuarryNodeState, ResidenceState } from './types.ts';
 import type { WorldLayoutRegistry } from './WorldLayoutRegistry.ts';
 import { buildingKindLabel, findNearestBuilding as findBuilding } from './WorldLayoutRegistry.ts';
 import { countTreesNearBuilding } from './ForestVisualSync.ts';
 import type { TreeRegistry } from './TreeRegistry.ts';
+import { RESIDENCE_PICK_RADIUS } from '../residences/burgageLayout.ts';
 
 const RIVER_INSPECT_MAX_SHORE = 8;
 const NEAREST_ROAD_MAX_DISTANCE = 18;
+
+function findNearestResidenceTarget(
+  state: GameState,
+  x: number,
+  z: number,
+): Extract<InspectableTarget, { kind: 'residence' }> | null {
+  let bestResidence: ResidenceState | null = null;
+  let bestDistance = Infinity;
+
+  for (const residence of state.residences.values()) {
+    const distance = Math.hypot(x - residence.x, z - residence.z);
+    if (distance > RESIDENCE_PICK_RADIUS || distance >= bestDistance) continue;
+    bestDistance = distance;
+    bestResidence = residence;
+  }
+
+  if (!bestResidence) return null;
+
+  const zone = state.burgageZones.get(bestResidence.zoneId);
+  if (!zone) return null;
+
+  let residenceCount = 0;
+  for (const residence of state.residences.values()) {
+    if (residence.zoneId === zone.id) residenceCount += 1;
+  }
+
+  return {
+    kind: 'residence',
+    residence: bestResidence,
+    zone,
+    residenceCount,
+  };
+}
+
+function pickCloserTarget(
+  buildingTarget: Extract<InspectableTarget, { kind: 'building' }>,
+  residenceTarget: Extract<InspectableTarget, { kind: 'residence' }>,
+  x: number,
+  z: number,
+): InspectableTarget {
+  const buildingDistance = Math.hypot(x - buildingTarget.building.x, z - buildingTarget.building.z);
+  const residenceDistance = Math.hypot(x - residenceTarget.residence.x, z - residenceTarget.residence.z);
+  return residenceDistance < buildingDistance ? residenceTarget : buildingTarget;
+}
 
 export class WorldQueries {
   private readonly terrain: Terrain;
@@ -48,6 +93,29 @@ export class WorldQueries {
   findInspectableTarget(x: number, z: number): InspectableTarget | null {
     const state = this.getGameState();
     const building = findBuilding(state.buildings.values(), x, z);
+    const residenceTarget = findNearestResidenceTarget(state, x, z);
+
+    if (building && residenceTarget) {
+      const treeRegistry = this.getTreeRegistry();
+      const counts = treeRegistry
+        ? countTreesNearBuilding(state, treeRegistry, building.x, building.z, building.workRadius)
+        : { matureTrees: 0, stumpTrees: 0, growingTrees: 0 };
+      return pickCloserTarget(
+        {
+          kind: 'building',
+          building,
+          matureTrees: counts.matureTrees,
+          stumpTrees: counts.stumpTrees,
+          growingTrees: counts.growingTrees,
+        },
+        residenceTarget,
+        x,
+        z,
+      );
+    }
+
+    if (residenceTarget) return residenceTarget;
+
     if (building) {
       const treeRegistry = this.getTreeRegistry();
       const counts = treeRegistry

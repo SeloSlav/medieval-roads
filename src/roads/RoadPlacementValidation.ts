@@ -13,11 +13,17 @@ export type RoadPlacementResult =
 
 const MAX_SEGMENT_SLOPE = 0.45;
 
+export type RoadPlacementValidationOptions = {
+  sampledPath?: THREE.Vector3[];
+  rockCheckPath?: THREE.Vector3[];
+};
+
 export function validateRoadPlacement(
   points: THREE.Vector3[],
   sceneManager: SceneManager,
   roadWidth: number,
   minCommitLength: number,
+  options?: RoadPlacementValidationOptions,
 ): RoadPlacementResult {
   if (points.length < 2) return { ok: false, reason: 'too_short' };
   if (pathLength(points) < minCommitLength) return { ok: false, reason: 'too_short' };
@@ -29,11 +35,17 @@ export function validateRoadPlacement(
   }
 
   const bridgeCtx = sceneManager.getBridgeSamplingContext();
-  const sampled = sceneManager.roadMeshBuilder.samplePath(points, 1.25);
+  const sampled = options?.sampledPath ?? sceneManager.roadMeshBuilder.samplePath(points, 1.25);
   const wetSpan = maxWetRunLength(sampled, bridgeCtx.isWaterAt);
   if (wetSpan > MAX_BRIDGE_SPAN_LENGTH) return { ok: false, reason: 'river_too_wide' };
 
-  const blockReason = sceneManager.getRoadPathBlockReason(points, roadWidth, bridgeCtx);
+  const blockReason = sceneManager.getRoadPathBlockReason(
+    points,
+    roadWidth,
+    bridgeCtx,
+    sampled,
+    options?.rockCheckPath,
+  );
   if (blockReason) return { ok: false, reason: blockReason };
 
   return { ok: true };
@@ -44,8 +56,9 @@ export function isRoadPlacementValid(
   sceneManager: SceneManager,
   roadWidth: number,
   minCommitLength: number,
+  options?: RoadPlacementValidationOptions,
 ): boolean {
-  return validateRoadPlacement(points, sceneManager, roadWidth, minCommitLength).ok;
+  return validateRoadPlacement(points, sceneManager, roadWidth, minCommitLength, options).ok;
 }
 
 function pathLength(points: THREE.Vector3[]): number {

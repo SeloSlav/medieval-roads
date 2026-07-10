@@ -483,14 +483,14 @@ function inferNextBuildingId(buildings: Map<string, BuildingState>): number {
   return maxId + 1;
 }
 
-function parseBuildingServerId(buildingId: string): number | null {
+function parseBuildingServerId(buildingId: string): bigint | null {
   const match = /^building-(\d+)$/.exec(buildingId);
   if (!match) return null;
-  return Number.parseInt(match[1], 10);
+  return BigInt(match[1]);
 }
 
-function parseZoneServerId(zoneId: string): number | null {
+function parseZoneServerId(zoneId: string): bigint | null {
   const match = /^zone-(\d+)$/.exec(zoneId);
   if (!match) return null;
-  return Number.parseInt(match[1], 10);
+  return BigInt(match[1]);
 }

@@ -23,6 +23,10 @@ pub fn building_cost(kind: &str) -> Result<ResourceAmount, String> {
             wood: 35.0,
             stone: 10.0,
         }),
+        "woodcutters_lodge" => Ok(ResourceAmount {
+            wood: 40.0,
+            stone: 12.0,
+        }),
         "stone_quarry" => Ok(ResourceAmount {
             wood: 25.0,
             stone: 40.0,

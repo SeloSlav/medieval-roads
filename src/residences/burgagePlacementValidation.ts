@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
+import type { BuildingState, BurgageZoneState } from '../resources/types.ts';
 import { distancePointToPolylineXZ } from '../utils/pathGeometry.ts';
 import { residenceZoneCost } from '../resources/buildingEconomy.ts';
 import {
@@ -8,13 +9,17 @@ import {
   type BurgageZoneCorners,
   MAX_ROAD_FRONTAGE_DISTANCE,
   MIN_PLOT_FRONTAGE,
+  MIN_ZONE_DEPTH,
   autoFrontageEdge,
-  computeBurgageLayout,
   cornersFromPoints,
+  cornersToArray,
   getZoneEdge,
+  measureZoneDepth,
+  resolveBurgageLayout,
   suggestPlotCount,
 } from './burgageLayout.ts';
-import { isConvexQuad2, polygonArea2 } from '../utils/polygonGeometry.ts';
+import { convexPolygonsOverlap2, isConvexQuad2, polygonArea2 } from '../utils/polygonGeometry.ts';
+import { burgageZoneOverlapsBuildings } from '../placement/placementConflicts.ts';
 
 export type BurgagePlacementFailureReason =
   | 'water'
@@ -22,6 +27,9 @@ export type BurgagePlacementFailureReason =
   | 'invalid_shape'
   | 'too_small'
   | 'no_road_frontage'
+  | 'overlaps_existing'
+  | 'overlaps_building'
+  | 'on_quarry_pit'
   | 'insufficient_resources'
   | 'no_fit';
 
@@ -37,10 +45,27 @@ type BurgagePlacementContext = {
   frontageEdge: BurgageFrontageEdge;
   plotCount: number;
   stockpile: { wood: number; stone: number };
+  existingZones: Iterable<BurgageZoneState>;
+  existingBuildings: Iterable<BuildingState>;
   roadNetwork: RoadNetwork;
   isWaterAt: (x: number, z: number) => boolean;
+  isQuarryPitAt?: (x: number, z: number) => boolean;
   getNaturalHeightAt: (x: number, z: number) => number;
 };
+
+function zonePolygon(zone: BurgageZoneState) {
+  return [zone.cornerA, zone.cornerB, zone.cornerC, zone.cornerD];
+}
+
+function overlapsExistingZone(zoneCorners: BurgageZoneCorners, existingZones: Iterable<BurgageZoneState>): boolean {
+  const candidate = cornersToArray(zoneCorners);
+  for (const zone of existingZones) {
+    if (convexPolygonsOverlap2(candidate, zonePolygon(zone))) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function validateBurgagePlacement(context: BurgagePlacementContext): BurgagePlacementResult {
   if (context.corners.length !== 4) {
@@ -50,6 +75,9 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
   for (const corner of context.corners) {
     if (context.isWaterAt(corner.x, corner.z)) {
       return { ok: false, reason: 'water' };
+    }
+    if (context.isQuarryPitAt?.(corner.x, corner.z)) {
+      return { ok: false, reason: 'on_quarry_pit' };
     }
   }
 
@@ -78,9 +106,20 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
     return { ok: false, reason: 'no_road_frontage' };
   }
 
-  const layout = computeBurgageLayout(zoneCorners, context.frontageEdge, context.plotCount);
+  const layout = resolveBurgageLayout(zoneCorners, context.frontageEdge, context.plotCount);
   if (!layout || layout.residences.length === 0) {
+    if (measureZoneDepth(zoneCorners, context.frontageEdge) < MIN_ZONE_DEPTH) {
+      return { ok: false, reason: 'too_small' };
+    }
     return { ok: false, reason: 'no_fit' };
+  }
+
+  if (overlapsExistingZone(zoneCorners, context.existingZones)) {
+    return { ok: false, reason: 'overlaps_existing' };
+  }
+
+  if (burgageZoneOverlapsBuildings(zoneCorners, context.existingBuildings)) {
+    return { ok: false, reason: 'overlaps_building' };
   }
 
   const cost = residenceZoneCost(layout.residences.length);

@@ -34,6 +34,7 @@ type TslNode = {
 export type GrassBladeField = {
   group: THREE.Group;
   syncRoadClearance: (network: RoadNetwork) => void;
+  setBuildInteractionActive: (active: boolean) => void;
   updateCameraState: (
     cameraPosition: THREE.Vector3,
     cameraTarget: THREE.Vector3,
@@ -207,10 +208,16 @@ export function createGrassBladeField(
     roadClearanceDirty = false;
   };
 
+  let buildInteractionActive = false;
+  let boundingSphereFrame = 0;
+
   const stepPendingSlots = (focusX: number, focusZ: number): void => {
     if (pendingSlots.length === 0) return;
 
-    const end = Math.min(GRASS_STREAM_SLOTS_PER_FRAME, pendingSlots.length);
+    const slotBudget = buildInteractionActive
+      ? Math.max(2, Math.floor(GRASS_STREAM_SLOTS_PER_FRAME * 0.4))
+      : GRASS_STREAM_SLOTS_PER_FRAME;
+    const end = Math.min(slotBudget, pendingSlots.length);
     for (let index = 0; index < end; index++) {
       const slot = pendingSlots[index]!;
       regenerateSlot(slot.gridIndex, slot.worldChunkX, slot.worldChunkZ, focusX, focusZ);
@@ -219,7 +226,11 @@ export function createGrassBladeField(
     refreshMeshCount();
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
+    boundingSphereFrame++;
+    const sphereInterval = buildInteractionActive ? 4 : 1;
+    if (boundingSphereFrame % sphereInterval === 0) {
+      mesh.computeBoundingSphere();
+    }
   };
 
   const shouldRecentreStream = (
@@ -241,6 +252,9 @@ export function createGrassBladeField(
     syncRoadClearance(network: RoadNetwork) {
       context.roadEdges = [...network.edges.values()];
       roadClearanceDirty = true;
+    },
+    setBuildInteractionActive(active: boolean) {
+      buildInteractionActive = active;
     },
     updateCameraState(
       cameraPosition: THREE.Vector3,
@@ -303,6 +317,7 @@ function createDisabledGrassBladeField(): GrassBladeField {
   return {
     group,
     syncRoadClearance() {},
+    setBuildInteractionActive() {},
     updateCameraState() {},
     dispose() {},
   };

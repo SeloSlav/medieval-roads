@@ -7,6 +7,7 @@ export class TerrainProjector {
   private readonly domElement: HTMLElement;
   private readonly raycaster = new THREE.Raycaster();
   private readonly mouse = new THREE.Vector2();
+  private readonly hitScratch = new THREE.Vector3();
 
   constructor(terrain: Terrain, camera: THREE.Camera, domElement: HTMLElement) {
     this.terrain = terrain;
@@ -21,7 +22,8 @@ export class TerrainProjector {
     this.mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.mouse, this.camera);
     const hits = this.raycaster.intersectObject(this.terrain.mesh, false);
-    return hits[0]?.point.clone() ?? null;
+    if (!hits[0]) return null;
+    return this.hitScratch.copy(hits[0].point);
   }
 
   project(point: THREE.Vector3, offset = 0): THREE.Vector3 {

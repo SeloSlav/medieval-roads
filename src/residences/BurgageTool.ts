@@ -3,7 +3,7 @@ import type { TerrainProjector } from '../terrain/TerrainProjector.ts';
 import type { RoadNetwork } from '../roads/RoadNetwork.ts';
 import type { GameState } from '../resources/types.ts';
 import type { BurgageFrontageEdge } from './burgageLayout.ts';
-import { cornersFromPoints, computeBurgageLayout } from './burgageLayout.ts';
+import { cornersFromPoints, resolveBurgageLayout } from './burgageLayout.ts';
 import {
   rectangleCornersToPoints,
   rectangleFromFrontageAndBackPoint,
@@ -35,6 +35,7 @@ type BurgageToolOptions = {
   getHeightAt: (x: number, z: number) => number;
   getNaturalHeightAt: (x: number, z: number) => number;
   isWaterAt: (x: number, z: number) => boolean;
+  isQuarryPitAt?: (x: number, z: number) => boolean;
   onCommit: (commit: BurgageZoneCommit) => void | Promise<void>;
   onModeChanged: () => void;
   onPlacementRejected?: (reason: BurgagePlacementFailureReason) => void;
@@ -48,10 +49,16 @@ export class BurgageTool {
   private readonly preview: BurgagePreview;
   private enabled = false;
   private points: THREE.Vector3[] = [];
+  private depthPoint: THREE.Vector3 | null = null;
+  private placementStage = 0;
   private frontageEdge: BurgageFrontageEdge = 0;
   private plotCount = 1;
   private plotCountTouched = false;
   private hoverPoint: THREE.Vector3 | null = null;
+  private pointerInside = false;
+  private pointerClientX = 0;
+  private pointerClientY = 0;
+  private pointerDirty = false;
   private lastHoverPreviewX = Number.NaN;
   private lastHoverPreviewZ = Number.NaN;
 
@@ -60,6 +67,8 @@ export class BurgageTool {
     this.preview = new BurgagePreview();
     options.domElement.addEventListener('mousedown', this.onPointerDown, { capture: true });
     options.domElement.addEventListener('mousemove', this.onPointerMove);
+    options.domElement.addEventListener('mouseenter', this.onPointerEnter);
+    options.domElement.addEventListener('mouseleave', this.onPointerLeave);
     window.addEventListener('keydown', this.onKeyDown);
   }
 
@@ -73,11 +82,11 @@ export class BurgageTool {
   }
 
   hasDraft(): boolean {
-    return this.points.length > 0;
+    return this.placementStage > 0;
   }
 
   isDraftBuildable(): boolean {
-    return this.getValidation().ok;
+    return this.placementStage >= 4 && this.getValidation().ok;
   }
 
   setEnabled(enabled: boolean): void {
@@ -86,13 +95,14 @@ export class BurgageTool {
     if (!enabled) {
       this.cancelDraft(false);
     } else {
+      this.pointerDirty = true;
       this.refreshPreview();
     }
     this.options.onModeChanged();
   }
 
   getBuildButtonPosition(): { clientX: number; clientY: number } | null {
-    if (!this.enabled || !this.isDraftBuildable() || this.points.length < 4) return null;
+    if (!this.enabled || !this.isDraftBuildable() || this.placementStage < 4) return null;
     const anchor = this.points[1] ?? this.points[this.points.length - 1];
     const rect = this.options.domElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
@@ -108,27 +118,35 @@ export class BurgageTool {
 
   getStatusDetail(): string | null {
     if (!this.enabled) return null;
-    if (this.points.length === 0) {
-      return 'Click the first road-frontage corner';
+    if (this.placementStage === 0) {
+      return 'Click the first corner along the road';
     }
-    if (this.points.length === 1) {
-      return 'Click the second frontage corner along the road';
+    if (this.placementStage === 1) {
+      return 'Click the second corner along the road';
     }
-    if (this.points.length === 2) {
-      return 'Click behind the frontage to set zone depth (rectangle closes automatically)';
+    if (this.placementStage === 2) {
+      return 'Click the third corner to set zone depth';
+    }
+    if (this.placementStage === 3) {
+      return 'Click the fourth corner to close the rectangle';
     }
     const validation = this.getValidation();
-    if (!validation.ok) return 'Adjust zone or plot count';
+    if (!validation.ok) {
+      if (validation.reason === 'too_small') return 'Draw the zone deeper behind the road (~14m minimum)';
+      if (validation.reason === 'no_fit') return 'Too many plots — press − to reduce plot count';
+      if (validation.reason === 'insufficient_resources') return 'Not enough wood or stone';
+      return 'Adjust zone or plot count';
+    }
     const count = validation.layout.residences.length;
     const cost = validation.layout.totalCost;
     return `${count} ${count === 1 ? 'residence' : 'residences'} — ${cost.wood} wood, ${cost.stone} stone`;
   }
 
   commitDraft(): void {
-    if (this.points.length < 4) return;
+    if (this.placementStage < 4) return;
     const validation = this.getValidation();
     if (!validation.ok) {
-      this.options.onPlacementRejected?.(validation.reason);
+      this.rejectCommit(validation.reason);
       return;
     }
     void this.commitValidated();
@@ -137,6 +155,8 @@ export class BurgageTool {
   dispose(): void {
     this.options.domElement.removeEventListener('mousedown', this.onPointerDown, { capture: true });
     this.options.domElement.removeEventListener('mousemove', this.onPointerMove);
+    this.options.domElement.removeEventListener('mouseenter', this.onPointerEnter);
+    this.options.domElement.removeEventListener('mouseleave', this.onPointerLeave);
     window.removeEventListener('keydown', this.onKeyDown);
     this.preview.dispose();
   }
@@ -146,17 +166,43 @@ export class BurgageTool {
   }
 
   update(): void {
-    if (!this.enabled || this.options.isBlocked()) {
+    if (!this.enabled) {
       this.preview.clear();
+      return;
     }
+    if (this.options.isBlocked()) return;
+    if (this.pointerDirty) {
+      this.pointerDirty = false;
+      this.processPointerHover(this.pointerClientX, this.pointerClientY);
+    }
+  }
+
+  private readonly onPointerEnter = (): void => {
+    this.pointerInside = true;
+    this.pointerDirty = true;
+  };
+
+  private readonly onPointerLeave = (): void => {
+    this.pointerInside = false;
+    this.hoverPoint = null;
+    this.lastHoverPreviewX = Number.NaN;
+    this.lastHoverPreviewZ = Number.NaN;
+    this.refreshPreview();
+  };
+
+  private processPointerHover(clientX: number, clientY: number): void {
+    if (!this.enabled || this.options.isBlocked() || !this.pointerInside) return;
+    const point = this.pickPoint(clientX, clientY);
+    if (point && this.shouldSkipHoverPreview(point)) return;
+    this.hoverPoint = point;
+    this.refreshPreview();
   }
 
   private readonly onPointerMove = (event: MouseEvent): void => {
     if (!this.enabled || this.options.isBlocked()) return;
-    const point = this.pickPoint(event.clientX, event.clientY);
-    if (point && this.shouldSkipHoverPreview(point)) return;
-    this.hoverPoint = point;
-    this.refreshPreview();
+    this.pointerClientX = event.clientX;
+    this.pointerClientY = event.clientY;
+    this.pointerDirty = true;
   };
 
   private shouldSkipHoverPreview(point: THREE.Vector3): boolean {
@@ -176,12 +222,12 @@ export class BurgageTool {
       return;
     }
 
-    if (this.points.length >= 4) {
+    if (this.placementStage >= 4) {
       const validation = this.getValidation();
       if (!validation.ok) {
         event.preventDefault();
         event.stopPropagation();
-        this.options.onPlacementRejected?.(validation.reason);
+        this.rejectCommit(validation.reason);
         return;
       }
       event.preventDefault();
@@ -190,8 +236,9 @@ export class BurgageTool {
       return;
     }
 
-    if (this.points.length === 2) {
-      const rectangle = this.buildRectangleFromPoint(point);
+    if (this.placementStage === 3) {
+      const backPoint = this.hoverPoint ?? this.depthPoint ?? point;
+      const rectangle = this.buildRectangleFromBackPoint(backPoint);
       if (!rectangle) {
         this.options.onPickRejected?.('too_close');
         return;
@@ -199,7 +246,25 @@ export class BurgageTool {
       event.preventDefault();
       event.stopPropagation();
       this.points = rectangle;
+      this.depthPoint = null;
+      this.placementStage = 4;
       this.syncFrontageAndPlotCount();
+      this.options.onModeChanged();
+      this.refreshPreview();
+      return;
+    }
+
+    if (this.placementStage === 2) {
+      if (this.points.length < 2) return;
+      const rectangle = this.buildRectangleFromBackPoint(point);
+      if (!rectangle) {
+        this.options.onPickRejected?.('too_close');
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      this.depthPoint = point.clone();
+      this.placementStage = 3;
       this.options.onModeChanged();
       this.refreshPreview();
       return;
@@ -216,13 +281,23 @@ export class BurgageTool {
     event.preventDefault();
     event.stopPropagation();
     this.points.push(point);
+    this.placementStage = this.points.length;
     this.options.onModeChanged();
     this.refreshPreview();
   };
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     if (!this.enabled || this.options.isBlocked()) return;
-    if (this.points.length < 4) return;
+    if (isTypingTarget(event.target)) return;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (this.hasDraft()) this.cancelDraft(true);
+      else this.setEnabled(false);
+      return;
+    }
+
+    if (this.placementStage < 4) return;
 
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -257,7 +332,7 @@ export class BurgageTool {
   private async commitValidated(): Promise<void> {
     const validation = this.getValidation();
     if (!validation.ok) {
-      this.options.onPlacementRejected?.(validation.reason);
+      this.rejectCommit(validation.reason);
       return;
     }
     try {
@@ -273,8 +348,17 @@ export class BurgageTool {
     }
   }
 
+  private rejectCommit(reason: BurgagePlacementFailureReason): void {
+    this.options.onPlacementRejected?.(reason);
+    if (reason === 'insufficient_resources') {
+      this.setEnabled(false);
+    }
+  }
+
   private cancelDraft(notify: boolean): void {
     this.points = [];
+    this.depthPoint = null;
+    this.placementStage = 0;
     this.hoverPoint = null;
     this.lastHoverPreviewX = Number.NaN;
     this.lastHoverPreviewZ = Number.NaN;
@@ -291,14 +375,18 @@ export class BurgageTool {
       frontageEdge: this.frontageEdge,
       plotCount: this.plotCount,
       stockpile: this.options.getState().stockpile,
+      existingZones: this.options.getState().burgageZones.values(),
+      existingBuildings: this.options.getState().buildings.values(),
       roadNetwork: this.options.roadNetwork,
       isWaterAt: this.options.isWaterAt,
+      isQuarryPitAt: this.options.isQuarryPitAt,
       getNaturalHeightAt: this.options.getNaturalHeightAt,
     });
   }
 
   private refreshPreview(): void {
     const corners = this.resolvePreviewCorners();
+    const placing = this.placementStage < 4;
 
     let layout = null;
     let previewFrontageEdge = this.frontageEdge;
@@ -308,17 +396,17 @@ export class BurgageTool {
       const cornerPoints = corners.map((point) => ({ x: point.x, z: point.z }));
       const zoneCorners = cornersFromPoints(cornerPoints);
       if (zoneCorners) {
-        if (this.points.length < 4) {
+        if (placing) {
           previewFrontageEdge = detectFrontageEdge(zoneCorners, this.options.roadNetwork);
           if (!this.plotCountTouched) {
             previewPlotCount = initialPlotCount(zoneCorners, previewFrontageEdge);
           }
         }
-        layout = computeBurgageLayout(zoneCorners, previewFrontageEdge, previewPlotCount);
+        layout = resolveBurgageLayout(zoneCorners, previewFrontageEdge, previewPlotCount);
       }
     }
 
-    const validation = this.points.length === 4
+    const validation = this.placementStage >= 4
       ? this.getValidation()
       : corners.length === 4
         ? validateBurgagePlacement({
@@ -326,8 +414,11 @@ export class BurgageTool {
           frontageEdge: previewFrontageEdge,
           plotCount: previewPlotCount,
           stockpile: this.options.getState().stockpile,
+          existingZones: this.options.getState().burgageZones.values(),
+          existingBuildings: this.options.getState().buildings.values(),
           roadNetwork: this.options.roadNetwork,
           isWaterAt: this.options.isWaterAt,
+          isQuarryPitAt: this.options.isQuarryPitAt,
           getNaturalHeightAt: this.options.getNaturalHeightAt,
         })
         : { ok: false as const, reason: 'invalid_shape' as const };
@@ -341,27 +432,32 @@ export class BurgageTool {
       layout,
       validation.ok,
       this.options.getHeightAt,
-      this.points.length < 4,
+      placing,
+      this.placementStage,
+      this.hoverPoint,
     );
   }
 
   private resolvePreviewCorners(): THREE.Vector3[] {
-    if (this.points.length >= 4) {
+    if (this.placementStage >= 4) {
       return this.points.map((point) => point.clone());
     }
-    if (this.points.length === 2) {
-      const backPoint = this.hoverPoint ?? this.points[1];
-      const rectangle = this.buildRectangleFromBackPoint(backPoint);
-      return rectangle ?? [...this.points];
-    }
-    if (this.points.length === 1 && this.hoverPoint) {
-      return [this.points[0].clone(), this.hoverPoint.clone()];
-    }
-    return this.points.map((point) => point.clone());
-  }
 
-  private buildRectangleFromPoint(point: THREE.Vector3): THREE.Vector3[] | null {
-    return this.buildRectangleFromBackPoint(point);
+    if (this.points.length >= 2) {
+      const backPoint = this.placementStage >= 3
+        ? (this.hoverPoint ?? this.depthPoint ?? this.points[1])
+        : (this.depthPoint ?? this.hoverPoint ?? this.points[1]);
+      const rectangle = this.buildRectangleFromBackPoint(backPoint);
+      if (rectangle) return rectangle;
+    }
+
+    if (this.points.length === 1) {
+      const corners = [this.points[0].clone()];
+      if (this.hoverPoint) corners.push(this.hoverPoint.clone());
+      return corners;
+    }
+
+    return this.points.map((point) => point.clone());
   }
 
   private buildRectangleFromBackPoint(backPoint: THREE.Vector3): THREE.Vector3[] | null {
@@ -409,4 +505,10 @@ export class BurgageTool {
     if (!snap) return point;
     return snap.point.clone();
   }
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || Boolean(element?.isContentEditable);
 }

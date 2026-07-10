@@ -94,7 +94,7 @@ export class BuildingMarkers {
 
     const y = this.terrain.getHeightAt(x, z);
     const yaw = buildingPlacementYaw(x, z);
-    this.previewMesh.visible = true;
+    this.previewMesh.visible = radius > 0;
     this.previewMesh.position.set(x, y + 0.2, z);
     this.previewMesh.scale.set(radius, 1, radius);
 
@@ -138,7 +138,12 @@ export class BuildingMarkers {
     const radiusMesh = this.radiusMeshes.get(building.id);
     if (radiusMesh) {
       radiusMesh.position.set(building.x, y + 0.15, building.z);
-      radiusMesh.scale.set(building.workRadius, 1, building.workRadius);
+      if (building.workRadius > 0) {
+        radiusMesh.visible = true;
+        radiusMesh.scale.set(building.workRadius, 1, building.workRadius);
+      } else {
+        radiusMesh.visible = false;
+      }
     }
   }
 
@@ -162,6 +167,8 @@ function buildingRadiusColor(kind: BuildingState['kind']): number {
       return 0xd7b463;
     case 'reforester':
       return 0x84a66b;
+    case 'woodcutters_lodge':
+      return 0xc9a227;
     case 'stone_quarry':
       return 0xa8a29e;
     default: {

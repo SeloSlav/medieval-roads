@@ -6,13 +6,27 @@ const VALID_ZONE_COLOR = 0x8ec07c;
 const INVALID_ZONE_COLOR = 0xd45d4a;
 const VALID_ZONE_FILL = 0x8ec07c;
 const INVALID_ZONE_FILL = 0xd45d4a;
+const PLACING_OUTLINE_COLOR = 0xffffff;
+const PLACING_CORNER_COLOR = 0xffffff;
 const PARCEL_FILL_COLOR = 0xc9b07f;
 const PARCEL_LINE_COLOR = 0xe8d4a8;
 const DIVIDER_LINE_COLOR = 0xf2e3b7;
-const CORNER_COLOR = 0xf2e3b7;
 const HOUSE_PREVIEW_COLOR = 0xd7b463;
 const MAX_PARCEL_FILLS = 12;
 const MAX_HOUSE_PREVIEWS = 12;
+const DASH_LENGTH = 1.8;
+const DASH_GAP = 1.0;
+
+type EdgeSegment = readonly [THREE.Vector3, THREE.Vector3];
+type LineObject = THREE.LineSegments | THREE.Line;
+type GeometryObject = THREE.Mesh | LineObject;
+
+function replaceGeometry(object: GeometryObject): THREE.BufferGeometry {
+  object.geometry.dispose();
+  const geometry = new THREE.BufferGeometry();
+  object.geometry = geometry;
+  return geometry;
+}
 
 function writeTriangleFan(
   geometry: THREE.BufferGeometry,
@@ -22,53 +36,95 @@ function writeTriangleFan(
 ): boolean {
   if (points.length < 3) return false;
 
-  const vertices = new Float32Array(points.length * 3);
-  for (let i = 0; i < points.length; i++) {
-    const point = points[i];
-    vertices[i * 3] = point.x;
-    vertices[i * 3 + 1] = getHeightAt(point.x, point.z) + lift;
-    vertices[i * 3 + 2] = point.z;
-  }
-
-  const indices: number[] = [];
+  const triangleCount = points.length - 2;
+  const vertices = new Float32Array(triangleCount * 9);
+  let offset = 0;
   for (let i = 1; i < points.length - 1; i++) {
-    indices.push(0, i, i + 1);
+    for (const index of [0, i, i + 1]) {
+      const point = points[index];
+      vertices[offset++] = point.x;
+      vertices[offset++] = getHeightAt(point.x, point.z) + lift;
+      vertices[offset++] = point.z;
+    }
   }
 
   geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
   return true;
 }
 
-function writeLineLoop(geometry: THREE.BufferGeometry, points: THREE.Vector3[]): void {
-  if (points.length < 2) {
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-    return;
-  }
-  geometry.setFromPoints(points);
+function assignTriangleFanMesh(
+  mesh: THREE.Mesh,
+  points: THREE.Vector3[],
+  getHeightAt: (x: number, z: number) => number,
+  lift: number,
+): boolean {
+  const geometry = replaceGeometry(mesh);
+  const filled = writeTriangleFan(geometry, points, getHeightAt, lift);
+  mesh.visible = filled;
+  return filled;
 }
 
-function writeDashedLoop(geometry: THREE.BufferGeometry, points: THREE.Vector3[]): void {
-  if (points.length < 2) {
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-    return;
-  }
-  geometry.setFromPoints(points);
-  const line = new THREE.Line(geometry);
-  const distances = line.computeLineDistances();
-  const lineDistance = distances.geometry.getAttribute('lineDistance');
-  if (lineDistance) {
-    geometry.setAttribute('lineDistance', lineDistance);
-  }
-}
-
-function writeLineSegments(geometry: THREE.BufferGeometry, positions: number[]): void {
+function assignLineSegments(line: LineObject, positions: number[]): void {
+  const geometry = replaceGeometry(line);
   if (positions.length === 0) {
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+    line.visible = false;
     return;
   }
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  line.visible = true;
+}
+
+function collectEdges(points: THREE.Vector3[], closeLoop: boolean): EdgeSegment[] {
+  const edges: EdgeSegment[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    edges.push([points[i], points[i + 1]]);
+  }
+  if (closeLoop && points.length >= 4) {
+    edges.push([points[points.length - 1], points[0]]);
+  }
+  return edges;
+}
+
+function buildSolidEdgePositions(edges: EdgeSegment[]): number[] {
+  const positions: number[] = [];
+  for (const [start, end] of edges) {
+    positions.push(start.x, start.y, start.z, end.x, end.y, end.z);
+  }
+  return positions;
+}
+
+function buildDashedEdgePositions(edges: EdgeSegment[]): number[] {
+  const positions: number[] = [];
+  const step = DASH_LENGTH + DASH_GAP;
+
+  for (const [start, end] of edges) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dz = end.z - start.z;
+    const length = Math.hypot(dx, dy, dz);
+    if (length < 0.2) continue;
+
+    const dirX = dx / length;
+    const dirY = dy / length;
+    const dirZ = dz / length;
+
+    let traveled = DASH_GAP * 0.5;
+    while (traveled + DASH_LENGTH <= length) {
+      const dashStart = traveled;
+      const dashEnd = traveled + DASH_LENGTH;
+      positions.push(
+        start.x + dirX * dashStart,
+        start.y + dirY * dashStart,
+        start.z + dirZ * dashStart,
+        start.x + dirX * dashEnd,
+        start.y + dirY * dashEnd,
+        start.z + dirZ * dashEnd,
+      );
+      traveled += step;
+    }
+  }
+
+  return positions;
 }
 
 function cornersSignature(corners: THREE.Vector3[]): string {
@@ -86,57 +142,65 @@ function layoutSignature(layout: BurgageLayoutResult | null): string {
 
 export class BurgagePreview {
   readonly group = new THREE.Group();
-  private readonly zoneLine: THREE.Line;
-  private readonly zoneLineSolid: THREE.LineBasicMaterial;
-  private readonly zoneLineDashed: THREE.LineDashedMaterial;
+  private readonly zoneOutline: THREE.LineSegments;
+  private readonly zoneOutlinePlacing: THREE.LineBasicMaterial;
+  private readonly zoneOutlineSolid: THREE.LineBasicMaterial;
   private readonly zoneFill: THREE.Mesh;
   private readonly parcelFillMeshes: THREE.Mesh[];
   private readonly parcelFillMaterial: THREE.MeshBasicMaterial;
   private readonly parcelLines: THREE.LineSegments;
   private readonly dividerLines: THREE.LineSegments;
   private readonly cornerMarkers: THREE.InstancedMesh;
+  private readonly hoverMarker: THREE.Mesh;
   private readonly houseMeshes: THREE.InstancedMesh;
   private lastSignature = '';
   private readonly cornerMatrix = new THREE.Matrix4();
   private readonly houseMatrix = new THREE.Matrix4();
   private readonly houseScale = new THREE.Vector3(MAIN_HOUSE_WIDTH, 5.4, MAIN_HOUSE_DEPTH);
+  private readonly housePosition = new THREE.Vector3();
+  private readonly houseQuaternion = new THREE.Quaternion();
 
   constructor() {
     this.group.name = 'Residence preview';
+    this.group.frustumCulled = false;
 
-    this.zoneLineSolid = new THREE.LineBasicMaterial({
+    this.zoneOutlinePlacing = new THREE.LineBasicMaterial({
+      color: PLACING_OUTLINE_COLOR,
+      transparent: true,
+      opacity: 0.98,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.zoneOutlineSolid = new THREE.LineBasicMaterial({
       color: VALID_ZONE_COLOR,
       transparent: true,
       opacity: 0.95,
       depthTest: false,
+      depthWrite: false,
     });
-    this.zoneLineDashed = new THREE.LineDashedMaterial({
-      color: VALID_ZONE_COLOR,
-      transparent: true,
-      opacity: 0.95,
-      dashSize: 2.4,
-      gapSize: 1.4,
-      depthTest: false,
-    });
-    this.zoneLine = new THREE.Line(
+    this.zoneOutline = new THREE.LineSegments(
       new THREE.BufferGeometry(),
-      this.zoneLineDashed,
+      this.zoneOutlinePlacing,
     );
-    this.zoneLine.renderOrder = 14;
-    this.group.add(this.zoneLine);
+    this.zoneOutline.renderOrder = 14;
+    this.zoneOutline.frustumCulled = false;
+    this.zoneOutline.visible = false;
+    this.group.add(this.zoneOutline);
 
     this.zoneFill = new THREE.Mesh(
       new THREE.BufferGeometry(),
       new THREE.MeshBasicMaterial({
         color: VALID_ZONE_FILL,
         transparent: true,
-        opacity: 0.24,
+        opacity: 0.28,
         side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: false,
       }),
     );
     this.zoneFill.renderOrder = 12;
+    this.zoneFill.frustumCulled = false;
+    this.zoneFill.visible = false;
     this.group.add(this.zoneFill);
 
     this.parcelFillMaterial = new THREE.MeshBasicMaterial({
@@ -151,6 +215,7 @@ export class BurgagePreview {
     for (let i = 0; i < MAX_PARCEL_FILLS; i++) {
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), this.parcelFillMaterial);
       mesh.renderOrder = 12;
+      mesh.frustumCulled = false;
       mesh.visible = false;
       this.parcelFillMeshes.push(mesh);
       this.group.add(mesh);
@@ -163,9 +228,12 @@ export class BurgagePreview {
         transparent: true,
         opacity: 0.9,
         depthTest: false,
+        depthWrite: false,
       }),
     );
     this.parcelLines.renderOrder = 13;
+    this.parcelLines.frustumCulled = false;
+    this.parcelLines.visible = false;
     this.group.add(this.parcelLines);
 
     this.dividerLines = new THREE.LineSegments(
@@ -175,25 +243,46 @@ export class BurgagePreview {
         transparent: true,
         opacity: 0.95,
         depthTest: false,
+        depthWrite: false,
       }),
     );
     this.dividerLines.renderOrder = 13;
+    this.dividerLines.frustumCulled = false;
+    this.dividerLines.visible = false;
     this.group.add(this.dividerLines);
 
-    const cornerGeometry = new THREE.SphereGeometry(0.55, 8, 8);
+    const cornerGeometry = new THREE.SphereGeometry(0.72, 10, 10);
     this.cornerMarkers = new THREE.InstancedMesh(
       cornerGeometry,
       new THREE.MeshBasicMaterial({
-        color: CORNER_COLOR,
+        color: PLACING_CORNER_COLOR,
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.98,
         depthWrite: false,
         depthTest: false,
       }),
       4,
     );
     this.cornerMarkers.renderOrder = 16;
+    this.cornerMarkers.frustumCulled = false;
+    this.cornerMarkers.count = 0;
+    this.cornerMarkers.visible = false;
     this.group.add(this.cornerMarkers);
+
+    this.hoverMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: PLACING_CORNER_COLOR,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    );
+    this.hoverMarker.renderOrder = 16;
+    this.hoverMarker.frustumCulled = false;
+    this.hoverMarker.visible = false;
+    this.group.add(this.hoverMarker);
 
     const houseGeometry = new THREE.BoxGeometry(1, 1, 1);
     this.houseMeshes = new THREE.InstancedMesh(
@@ -208,6 +297,9 @@ export class BurgagePreview {
       MAX_HOUSE_PREVIEWS,
     );
     this.houseMeshes.renderOrder = 15;
+    this.houseMeshes.frustumCulled = false;
+    this.houseMeshes.count = 0;
+    this.houseMeshes.visible = false;
     this.group.add(this.houseMeshes);
   }
 
@@ -217,54 +309,73 @@ export class BurgagePreview {
     valid: boolean,
     getHeightAt: (x: number, z: number) => number,
     placing = false,
+    placementStage = 0,
+    hoverPoint: THREE.Vector3 | null = null,
   ): void {
-    if (corners.length === 0) {
+    if (!placing && corners.length === 0) {
       this.clear();
       return;
     }
 
-    const signature = `${cornersSignature(corners)}|${valid ? 1 : 0}|${layoutSignature(layout)}|${placing ? 1 : 0}`;
+    const hoverSignature = hoverPoint ? `${hoverPoint.x.toFixed(2)},${hoverPoint.z.toFixed(2)}` : 'none';
+    const signature = `${cornersSignature(corners)}|${hoverSignature}|${valid ? 1 : 0}|${layoutSignature(layout)}|${placing ? 1 : 0}|${placementStage}`;
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
     this.group.visible = true;
     const edgeColor = valid ? VALID_ZONE_COLOR : INVALID_ZONE_COLOR;
     const fillColor = valid ? VALID_ZONE_FILL : INVALID_ZONE_FILL;
-    const outlineMaterial = placing ? this.zoneLineDashed : this.zoneLineSolid;
-    this.zoneLine.material = outlineMaterial;
-    outlineMaterial.color.setHex(edgeColor);
     (this.zoneFill.material as THREE.MeshBasicMaterial).color.setHex(fillColor);
 
-    const placedCornerCount = Math.min(corners.length, 4);
-    this.cornerMarkers.count = placedCornerCount;
-    for (let i = 0; i < placedCornerCount; i++) {
-      const corner = corners[i];
-      const y = getHeightAt(corner.x, corner.z) + 0.35;
+    const markerCount = placing && corners.length >= 4
+      ? 4
+      : placementStage > 0
+        ? Math.min(placementStage, corners.length, 4)
+        : 0;
+    const markerSource = corners.slice(0, markerCount);
+
+    this.cornerMarkers.count = markerSource.length;
+    this.cornerMarkers.visible = markerSource.length > 0;
+    for (let i = 0; i < markerSource.length; i++) {
+      const corner = markerSource[i];
+      const y = getHeightAt(corner.x, corner.z) + 0.42;
       this.cornerMatrix.identity();
       this.cornerMatrix.setPosition(corner.x, y, corner.z);
       this.cornerMarkers.setMatrixAt(i, this.cornerMatrix);
     }
-    this.cornerMarkers.instanceMatrix.needsUpdate = placedCornerCount > 0;
+    this.cornerMarkers.instanceMatrix.needsUpdate = markerSource.length > 0;
+
+    if (hoverPoint && placing && placementStage < 4) {
+      const y = getHeightAt(hoverPoint.x, hoverPoint.z) + 0.36;
+      this.hoverMarker.position.set(hoverPoint.x, y, hoverPoint.z);
+      this.hoverMarker.visible = true;
+    } else {
+      this.hoverMarker.visible = false;
+    }
 
     const lifted = corners.map((corner) => {
-      const y = getHeightAt(corner.x, corner.z) + 0.2;
+      const y = getHeightAt(corner.x, corner.z) + 0.22;
       return new THREE.Vector3(corner.x, y, corner.z);
     });
 
-    if (lifted.length >= 2) {
-      const loop = [...lifted];
-      if (lifted.length >= 4) loop.push(lifted[0]);
-      if (placing) {
-        writeDashedLoop(this.zoneLine.geometry, loop);
-      } else {
-        writeLineLoop(this.zoneLine.geometry, loop);
-      }
+    const closeLoop = lifted.length >= 4;
+    const edges = collectEdges(lifted, closeLoop);
+    if (placing) {
+      this.zoneOutline.material = this.zoneOutlinePlacing;
+      this.zoneOutlinePlacing.color.setHex(PLACING_OUTLINE_COLOR);
+      assignLineSegments(this.zoneOutline, buildDashedEdgePositions(edges));
     } else {
-      writeLineLoop(this.zoneLine.geometry, []);
+      this.zoneOutline.material = this.zoneOutlineSolid;
+      this.zoneOutlineSolid.color.setHex(edgeColor);
+      assignLineSegments(this.zoneOutline, buildSolidEdgePositions(edges));
     }
 
-    const hasFill = writeTriangleFan(this.zoneFill.geometry, corners, getHeightAt, 0.14);
-    this.zoneFill.visible = hasFill;
+    if (corners.length >= 4) {
+      assignTriangleFanMesh(this.zoneFill, corners, getHeightAt, 0.14);
+    } else {
+      replaceGeometry(this.zoneFill);
+      this.zoneFill.visible = false;
+    }
 
     const parcelPositions: number[] = [];
     const dividerPositions: number[] = [];
@@ -274,9 +385,7 @@ export class BurgagePreview {
       for (const parcel of layout.parcels) {
         const poly = parcel.polygon.map((point) => new THREE.Vector3(point.x, 0, point.z));
         if (parcelFillCount < MAX_PARCEL_FILLS) {
-          const mesh = this.parcelFillMeshes[parcelFillCount];
-          const filled = writeTriangleFan(mesh.geometry, poly, getHeightAt, 0.16);
-          mesh.visible = filled;
+          assignTriangleFanMesh(this.parcelFillMeshes[parcelFillCount], poly, getHeightAt, 0.16);
           parcelFillCount += 1;
         }
 
@@ -299,21 +408,22 @@ export class BurgagePreview {
     }
 
     for (let i = parcelFillCount; i < MAX_PARCEL_FILLS; i++) {
+      replaceGeometry(this.parcelFillMeshes[i]);
       this.parcelFillMeshes[i].visible = false;
     }
 
-    writeLineSegments(this.parcelLines.geometry, parcelPositions);
-    writeLineSegments(this.dividerLines.geometry, dividerPositions);
+    assignLineSegments(this.parcelLines, parcelPositions);
+    assignLineSegments(this.dividerLines, dividerPositions);
 
     const houseCount = layout?.residences.length ?? 0;
     this.houseMeshes.count = houseCount;
+    this.houseMeshes.visible = houseCount > 0;
     for (let i = 0; i < houseCount; i++) {
       const residence = layout!.residences[i];
       const y = getHeightAt(residence.x, residence.z) + this.houseScale.y * 0.5;
-      this.houseMatrix.identity();
-      this.houseMatrix.makeRotationY(residence.yaw);
-      this.houseMatrix.setPosition(residence.x, y, residence.z);
-      this.houseMatrix.scale(this.houseScale);
+      this.houseQuaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), residence.yaw);
+      this.housePosition.set(residence.x, y, residence.z);
+      this.houseMatrix.compose(this.housePosition, this.houseQuaternion, this.houseScale);
       this.houseMeshes.setMatrixAt(i, this.houseMatrix);
     }
     this.houseMeshes.instanceMatrix.needsUpdate = houseCount > 0;
@@ -323,19 +433,30 @@ export class BurgagePreview {
     this.lastSignature = '';
     this.group.visible = false;
     this.cornerMarkers.count = 0;
+    this.cornerMarkers.visible = false;
     this.cornerMarkers.instanceMatrix.needsUpdate = true;
+    this.hoverMarker.visible = false;
+    replaceGeometry(this.zoneOutline);
+    this.zoneOutline.visible = false;
+    replaceGeometry(this.zoneFill);
     this.zoneFill.visible = false;
     this.houseMeshes.count = 0;
+    this.houseMeshes.visible = false;
     this.houseMeshes.instanceMatrix.needsUpdate = true;
+    replaceGeometry(this.parcelLines);
+    this.parcelLines.visible = false;
+    replaceGeometry(this.dividerLines);
+    this.dividerLines.visible = false;
     for (const mesh of this.parcelFillMeshes) {
+      replaceGeometry(mesh);
       mesh.visible = false;
     }
   }
 
   dispose(): void {
-    this.zoneLine.geometry.dispose();
-    this.zoneLineSolid.dispose();
-    this.zoneLineDashed.dispose();
+    this.zoneOutline.geometry.dispose();
+    this.zoneOutlinePlacing.dispose();
+    this.zoneOutlineSolid.dispose();
     this.zoneFill.geometry.dispose();
     (this.zoneFill.material as THREE.Material).dispose();
     for (const mesh of this.parcelFillMeshes) {
@@ -348,6 +469,8 @@ export class BurgagePreview {
     (this.dividerLines.material as THREE.Material).dispose();
     this.cornerMarkers.geometry.dispose();
     (this.cornerMarkers.material as THREE.Material).dispose();
+    this.hoverMarker.geometry.dispose();
+    (this.hoverMarker.material as THREE.Material).dispose();
     this.houseMeshes.geometry.dispose();
     (this.houseMeshes.material as THREE.Material).dispose();
     this.group.clear();

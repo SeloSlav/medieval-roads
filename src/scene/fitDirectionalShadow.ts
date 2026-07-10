@@ -5,6 +5,7 @@ const SHADOW_CORNER = new THREE.Vector3();
 const SHADOW_VIEW = new THREE.Vector3();
 const SHADOW_TARGET = new THREE.Vector3();
 const SHADOW_VIEW_FORWARD = new THREE.Vector3();
+const SHADOW_SUN_OFFSET = new THREE.Vector3();
 
 /** Max instanced pine height at largest scale and broad form. */
 const MAX_TREE_HEIGHT = 48;
@@ -46,7 +47,7 @@ export function fitDirectionalLightShadow(
   const minZ = bounds.minZ - horizontalMargin;
   const maxZ = bounds.maxZ + horizontalMargin;
   const sampleCoords = buildShadowSampleCoords(minX, maxX, minZ, maxZ, maxHeight);
-  const normalizedSunOffset = sunOffsetDir.clone().normalize();
+  const normalizedSunOffset = SHADOW_SUN_OFFSET.copy(sunOffsetDir).normalize();
 
   SHADOW_TARGET.set((bounds.minX + bounds.maxX) * 0.5, 0, (bounds.minZ + bounds.maxZ) * 0.5);
   light.target.position.copy(SHADOW_TARGET);

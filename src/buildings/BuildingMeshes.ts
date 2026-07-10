@@ -642,6 +642,18 @@ export function createReforesterHutMesh(): THREE.Group {
   return group;
 }
 
+/** Timber hut for processing raw logs — reuses the forester shell with a yard log pile. */
+export function createWoodcuttersLodgeMesh(): THREE.Group {
+  const group = createReforesterHutMesh();
+  group.name = "Woodcutter's lodge";
+
+  const halfW = 6.4 * 0.5;
+  const halfD = 5.8 * 0.5;
+  addLogPile(group, halfW - 0.3, halfD + 1.6, 0, 5, 3.0, 0.26);
+
+  return group;
+}
+
 function addQuarryHoistFrame(
   group: THREE.Group,
   hoistX: number,
@@ -961,6 +973,8 @@ export function createBuildingMesh(kind: BuildingKind): THREE.Group {
       return createLumberMillMesh();
     case 'reforester':
       return createReforesterHutMesh();
+    case 'woodcutters_lodge':
+      return createWoodcuttersLodgeMesh();
     case 'stone_quarry':
       return createStoneQuarryMesh();
     default: {

@@ -4,13 +4,14 @@ use crate::db::*;
 
 use crate::constants::{
     LUMBER_MILL_INTERVAL, LUMBER_MILL_RADIUS, REFORESTER_RADIUS, STONE_QUARRY_INTERVAL,
-    STONE_QUARRY_RADIUS,
+    STONE_QUARRY_RADIUS, WOODCUTTERS_LODGE_RADIUS,
 };
 
 pub fn building_params(kind: &str) -> Result<(f64, f64), String> {
     match kind {
         "lumber_mill" => Ok((LUMBER_MILL_RADIUS, LUMBER_MILL_INTERVAL)),
         "reforester" => Ok((REFORESTER_RADIUS, 0.0)),
+        "woodcutters_lodge" => Ok((WOODCUTTERS_LODGE_RADIUS, 0.0)),
         "stone_quarry" => Ok((STONE_QUARRY_RADIUS, STONE_QUARRY_INTERVAL)),
         _ => Err(format!("Unknown building kind: {kind}")),
     }

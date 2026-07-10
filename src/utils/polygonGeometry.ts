@@ -93,16 +93,98 @@ export function perpendicularRight2(v: Point2): Point2 {
   return { x: v.z, z: -v.x };
 }
 
-export function orientedFootprintFits(
+export function distancePointToSegment2(point: Point2, segStart: Point2, segEnd: Point2): number {
+  const abx = segEnd.x - segStart.x;
+  const abz = segEnd.z - segStart.z;
+  const lengthSq = abx * abx + abz * abz;
+  const t = lengthSq <= 1e-6
+    ? 0
+    : Math.max(0, Math.min(1, ((point.x - segStart.x) * abx + (point.z - segStart.z) * abz) / lengthSq));
+  const px = segStart.x + abx * t;
+  const pz = segStart.z + abz * t;
+  return Math.hypot(point.x - px, point.z - pz);
+}
+
+export function polygonCentroid2(polygon: Point2[]): Point2 {
+  let x = 0;
+  let z = 0;
+  for (const point of polygon) {
+    x += point.x;
+    z += point.z;
+  }
+  const count = polygon.length;
+  return { x: x / count, z: z / count };
+}
+
+export function pointStrictlyInsidePolygon2(
+  point: Point2,
+  polygon: Point2[],
+  boundaryEpsilon = 0.12,
+): boolean {
+  if (!isPointInPolygon2(point, polygon)) return false;
+  for (let i = 0; i < polygon.length; i++) {
+    const start = polygon[i];
+    const end = polygon[(i + 1) % polygon.length];
+    if (distancePointToSegment2(point, start, end) <= boundaryEpsilon) return false;
+  }
+  return true;
+}
+
+export function segmentsIntersectProperly2(
+  a1: Point2,
+  a2: Point2,
+  b1: Point2,
+  b2: Point2,
+  epsilon: number,
+): boolean {
+  const d1 = cross2(b1, b2, a1);
+  const d2 = cross2(b1, b2, a2);
+  const d3 = cross2(a1, a2, b1);
+  const d4 = cross2(a1, a2, b2);
+  return (
+    ((d1 > epsilon && d2 < -epsilon) || (d1 < -epsilon && d2 > epsilon))
+    && ((d3 > epsilon && d4 < -epsilon) || (d3 < -epsilon && d4 > epsilon))
+  );
+}
+
+/** True when two convex polygons share interior area (touching at edges/corners is allowed). */
+export function convexPolygonsOverlap2(
+  a: Point2[],
+  b: Point2[],
+  boundaryEpsilon = 0.12,
+): boolean {
+  const samplesA = [...a, polygonCentroid2(a)];
+  const samplesB = [...b, polygonCentroid2(b)];
+
+  for (const point of samplesA) {
+    if (pointStrictlyInsidePolygon2(point, b, boundaryEpsilon)) return true;
+  }
+  for (const point of samplesB) {
+    if (pointStrictlyInsidePolygon2(point, a, boundaryEpsilon)) return true;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b1 = b[j];
+      const b2 = b[(j + 1) % b.length];
+      if (segmentsIntersectProperly2(a1, a2, b1, b2, boundaryEpsilon)) return true;
+    }
+  }
+
+  return false;
+}
+
+export function orientedRectCorners2(
   center: Point2,
   yaw: number,
   halfWidth: number,
   halfDepth: number,
-  polygon: Point2[],
-): boolean {
+): Point2[] {
   const cos = Math.cos(yaw);
   const sin = Math.sin(yaw);
-  const corners: Point2[] = [
+  return [
     { x: -halfWidth, z: -halfDepth },
     { x: halfWidth, z: -halfDepth },
     { x: halfWidth, z: halfDepth },
@@ -111,5 +193,15 @@ export function orientedFootprintFits(
     x: center.x + local.x * cos - local.z * sin,
     z: center.z + local.x * sin + local.z * cos,
   }));
+}
+
+export function orientedFootprintFits(
+  center: Point2,
+  yaw: number,
+  halfWidth: number,
+  halfDepth: number,
+  polygon: Point2[],
+): boolean {
+  const corners = orientedRectCorners2(center, yaw, halfWidth, halfDepth);
   return corners.every((corner) => isPointInPolygon2(corner, polygon));
 }

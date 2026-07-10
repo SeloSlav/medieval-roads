@@ -9,6 +9,12 @@ import type { BuildingTerrainSource } from './BuildingTerrainLayout.ts';
 
 export type BuildingToolMode = BuildingKind | 'off';
 
+function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  const tag = element?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || Boolean(element?.isContentEditable);
+}
+
 type BuildingToolOptions = {
   domElement: HTMLElement;
   terrainProjector: TerrainProjector;
@@ -16,7 +22,9 @@ type BuildingToolOptions = {
   getState: () => GameState;
   onPlaceBuilding: (kind: BuildingKind, x: number, z: number) => void | Promise<void>;
   isWaterAt: (x: number, z: number) => boolean;
+  isQuarryPitAt?: (x: number, z: number) => boolean;
   getNaturalHeightAt: (x: number, z: number) => number;
+  countMatureTreesInRadius?: (x: number, z: number, radius: number) => number;
   onPreviewChange?: (preview: BuildingTerrainSource | null) => void;
   onModeChanged: () => void;
   onPlacementRejected?: (reason: BuildingPlacementFailureReason) => void;
@@ -44,6 +52,7 @@ export class BuildingTool {
     options.domElement.addEventListener('mousemove', this.onPointerMove);
     options.domElement.addEventListener('mouseenter', this.onPointerEnter);
     options.domElement.addEventListener('mouseleave', this.onPointerLeave);
+    window.addEventListener('keydown', this.onKeyDown);
   }
 
   getMode(): BuildingToolMode {
@@ -83,7 +92,16 @@ export class BuildingTool {
     this.options.domElement.removeEventListener('mousemove', this.onPointerMove);
     this.options.domElement.removeEventListener('mouseenter', this.onPointerEnter);
     this.options.domElement.removeEventListener('mouseleave', this.onPointerLeave);
+    window.removeEventListener('keydown', this.onKeyDown);
   }
+
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (this.mode === 'off' || this.options.isBlocked()) return;
+    if (isTypingTarget(event.target)) return;
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    this.setMode('off');
+  };
 
   private readonly onPointerEnter = (): void => {
     this.pointerInside = true;
@@ -216,11 +234,16 @@ export class BuildingTool {
   }
 
   private validate(kind: BuildingKind, x: number, z: number) {
+    const state = this.options.getState();
     return validateBuildingPlacement(kind, x, z, {
-      buildings: this.options.getState().buildings.values(),
-      stockpile: this.options.getState().stockpile,
+      buildings: state.buildings.values(),
+      burgageZones: state.burgageZones.values(),
+      quarries: state.quarries.values(),
+      stockpile: state.stockpile,
       isWaterAt: this.options.isWaterAt,
+      isQuarryPitAt: this.options.isQuarryPitAt,
       getNaturalHeightAt: this.options.getNaturalHeightAt,
+      countMatureTreesInRadius: this.options.countMatureTreesInRadius,
     });
   }
 

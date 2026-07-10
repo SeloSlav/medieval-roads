@@ -20,7 +20,8 @@ import { SkyCloudMesh } from '../sky/SkyCloudMesh.ts';
 import { Terrain } from '../terrain/Terrain.ts';
 import { TerrainProjector } from '../terrain/TerrainProjector.ts';
 import { disposeObject3D } from '../utils/dispose.ts';
-import { isRockNearPath } from '../utils/pathGeometry.ts';
+import { computePathBoundsXZ } from '../utils/pathGeometry.ts';
+import { RockSpatialIndex } from '../utils/rockSpatialIndex.ts';
 import { yieldToMain } from '../utils/yieldToMain.ts';
 import { createPostProcessor, type ScenePostProcessor } from './PostProcessing.ts';
 import { fitDirectionalLightShadow } from './fitDirectionalShadow.ts';
@@ -60,6 +61,9 @@ export class SceneManager {
   private readonly roadGroup = new THREE.Group();
   private readonly junctionGroup = new THREE.Group();
   private readonly edgeVisuals = new Map<string, { revision: number; group: THREE.Group }>();
+  private rockSpatialIndex: RockSpatialIndex | null = null;
+  private buildInteractionActive = false;
+  private renderFrame = 0;
 
   private constructor(
     container: HTMLElement,
@@ -200,6 +204,7 @@ export class SceneManager {
     }
 
     this.scene.add(this.forestManager.group);
+    this.rebuildRockSpatialIndex();
 
     if (this.roadNetworkRef) {
       this.forestManager.syncRoadClearance(this.roadNetworkRef);
@@ -222,6 +227,20 @@ export class SceneManager {
     this.sky.updateResolution(width * pixelRatio, height * pixelRatio);
   }
 
+  setBuildInteractionActive(active: boolean): void {
+    this.buildInteractionActive = active;
+    this.grassField?.setBuildInteractionActive(active);
+  }
+
+  private rebuildRockSpatialIndex(): void {
+    const rocks = [
+      ...(this.forestManager?.rockPlacements ?? []),
+      ...this.riverSystem.shoreRockPlacements,
+      ...this.quarrySystem.rockPlacements,
+    ];
+    this.rockSpatialIndex = rocks.length > 0 ? new RockSpatialIndex(rocks) : null;
+  }
+
   render(dt: number, orbitDistance?: number, firstPersonActive = false): void {
     const elapsed = performance.now() * 0.001;
     const cameraDistance = orbitDistance ?? this.camera.position.distanceTo(this.cameraTarget);
@@ -242,7 +261,11 @@ export class SceneManager {
     this.sky.updateSun(this.sunDirection);
     this.sky.updateTime(elapsed);
     this.riverSystem.tick(dt, elapsed);
-    fitDirectionalLightShadow(this.sunLight, { bounds: this.terrain.bounds, sunOffsetDir: this.sunDirection });
+    this.renderFrame++;
+    const shadowInterval = this.buildInteractionActive ? 3 : 1;
+    if (this.renderFrame % shadowInterval === 0) {
+      fitDirectionalLightShadow(this.sunLight, { bounds: this.terrain.bounds, sunOffsetDir: this.sunDirection });
+    }
     this.postProcessor.render(dt);
   }
 
@@ -277,20 +300,18 @@ export class SceneManager {
     path: THREE.Vector3[],
     roadWidth: number,
     _bridgeCtx?: BridgeSamplingContext,
+    sampledPath?: THREE.Vector3[],
+    rockCheckPath?: THREE.Vector3[],
   ): 'river' | 'rocks' | null {
     if (path.length < 2) return null;
-    const sampled = this.roadMeshBuilder.samplePath(path, 1.25);
+    const sampled = sampledPath ?? this.roadMeshBuilder.samplePath(path, 1.25);
     if (sampled.length < 2) return null;
 
     const roadHalfWidth = roadWidth * 0.5;
-    for (const rock of this.forestManager?.rockPlacements ?? []) {
-      if (isRockNearPath(rock, sampled, roadHalfWidth)) return 'rocks';
-    }
-    for (const rock of this.riverSystem.shoreRockPlacements) {
-      if (isRockNearPath(rock, sampled, roadHalfWidth)) return 'rocks';
-    }
-    for (const rock of this.quarrySystem.rockPlacements) {
-      if (isRockNearPath(rock, sampled, roadHalfWidth)) return 'rocks';
+    const rockPath = rockCheckPath ?? sampled;
+    const bounds = computePathBoundsXZ(rockPath, roadHalfWidth + 10);
+    if (this.rockSpatialIndex?.findRockBlockNearPath(rockPath, bounds, roadHalfWidth)) {
+      return 'rocks';
     }
 
     return null;

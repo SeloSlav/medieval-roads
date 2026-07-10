@@ -6,6 +6,7 @@ import type { BuildingTerrainSource } from '../buildings/BuildingTerrainLayout.t
 import { BuildingTool } from '../buildings/BuildingTool.ts';
 import { BurgageTool } from '../residences/BurgageTool.ts';
 import { ResidenceMarkers } from '../residences/ResidenceMarkers.ts';
+import { BurgageFencing } from '../residences/BurgageFencing.ts';
 import { SpacetimeGameStore } from '../data/spacetimeGameStore.ts';
 import { InputManager } from '../input/InputManager.ts';
 import {
@@ -23,7 +24,7 @@ import {
 } from '../resources/GameState.ts';
 import type { SpacetimeGameSnapshot } from '../data/spacetimeGameStore.ts';
 import type { BuildingState, GameState } from '../resources/types.ts';
-import { ForestVisualSync } from '../resources/ForestVisualSync.ts';
+import { ForestVisualSync, countTreesNearBuilding } from '../resources/ForestVisualSync.ts';
 import { ResourceInspector } from '../resources/ResourceInspector.ts';
 import { TreeRegistry } from '../resources/TreeRegistry.ts';
 import { WorldLayoutRegistry } from '../resources/WorldLayoutRegistry.ts';
@@ -59,6 +60,7 @@ export class App {
   private burgageTool: BurgageTool | null = null;
   private buildingMarkers: BuildingMarkers | null = null;
   private residenceMarkers: ResidenceMarkers | null = null;
+  private burgageFencing: BurgageFencing | null = null;
   private toolbar: BuildToolbar | null = null;
   private toastManager: ToastManager | null = null;
   private resourceInspector: ResourceInspector | null = null;
@@ -150,12 +152,23 @@ export class App {
       onChange: () => this.syncToolbar(),
     });
 
+    const toggleRoadTool = (): void => {
+      roadTool.setEnabled(!roadTool.isEnabled());
+      if (roadTool.isEnabled()) {
+        buildingTool.setMode('off');
+        burgageTool.setEnabled(false);
+      }
+      this.syncToolbar();
+    };
+
     const roadTool = new RoadTool({
       domElement: sceneManager.renderer.domElement,
       network: roadNetwork,
       sceneManager,
       selection: roadSelection,
       terrainProjector: sceneManager.terrainProjector,
+      getGameState: () => this.gameState ?? gameState,
+      onToggle: toggleRoadTool,
       onNetworkChanged: () => {
         sceneManager.syncRoadNetwork(roadNetwork);
         roadSelection.refresh();
@@ -198,7 +211,14 @@ export class App {
         await this.spacetimeStore.placeBuilding(kind, x, z);
       },
       isWaterAt: (x, z) => sceneManager.riverField.isRenderedWetAt(x, z),
+      isQuarryPitAt: (x, z) => sceneManager.worldLayout.quarryLayout.isBlockedForProps(x, z),
       getNaturalHeightAt: (x, z) => sampleNaturalTerrainHeight(x, z),
+      countMatureTreesInRadius: (x, z, radius) => {
+        const registry = this.treeRegistry;
+        const state = this.gameState ?? gameState;
+        if (!registry) return 0;
+        return countTreesNearBuilding(state, registry, x, z, radius).matureTrees;
+      },
       onPreviewChange: (preview) => {
         this.syncBuildingTerrainLayout();
         this.syncPreviewTerrainPads(preview);
@@ -222,6 +242,7 @@ export class App {
       getHeightAt: (x, z) => sceneManager.terrain.getHeightAt(x, z),
       getNaturalHeightAt: (x, z) => sampleNaturalTerrainHeight(x, z),
       isWaterAt: (x, z) => sceneManager.riverField.isRenderedWetAt(x, z),
+      isQuarryPitAt: (x, z) => sceneManager.worldLayout.quarryLayout.isBlockedForProps(x, z),
       onCommit: async (commit) => {
         if (!this.spacetimeStore?.isConnected) {
           throw new Error('SpacetimeDB is not connected. Start the local server and refresh.');
@@ -251,16 +272,10 @@ export class App {
     burgageTool.attachTo(sceneManager.previewGroup);
 
     const residenceMarkers = new ResidenceMarkers(sceneManager.selectionGroup);
+    const burgageFencing = new BurgageFencing(sceneManager.selectionGroup);
 
     const toolbar = new BuildToolbar(uiRoot, {
-      onOpenRoads: () => {
-        roadTool.setEnabled(!roadTool.isEnabled());
-        if (roadTool.isEnabled()) {
-          buildingTool.setMode('off');
-          burgageTool.setEnabled(false);
-        }
-        this.syncToolbar();
-      },
+      onOpenRoads: toggleRoadTool,
       onBuildRoad: () => {
         if (burgageTool.isEnabled()) {
           burgageTool.commitDraft();
@@ -284,6 +299,14 @@ export class App {
         }
         this.syncToolbar();
       },
+      onToggleWoodcuttersLodge: () => {
+        buildingTool.toggleMode('woodcutters_lodge');
+        if (buildingTool.isEnabled()) {
+          roadTool.setEnabled(false);
+          burgageTool.setEnabled(false);
+        }
+        this.syncToolbar();
+      },
       onToggleStoneQuarry: () => {
         buildingTool.toggleMode('stone_quarry');
         if (buildingTool.isEnabled()) {
@@ -299,7 +322,7 @@ export class App {
           roadTool.setEnabled(false);
           buildingTool.setMode('off');
           this.toastManager?.show(
-            'Click two corners along the road for frontage, then click behind them to set depth — the rectangle closes automatically. Use +/− for plot count.',
+            'Click four corners along the road frontage and depth — the 4th click closes the rectangle. Use +/− for plot count.',
             { variant: 'info', durationMs: 6500 },
           );
         }
@@ -308,7 +331,11 @@ export class App {
       onMenuOpenChange: (open) => {
         cameraController.setInputEnabled(!open && !firstPersonController.isActive());
       },
-      canOpenMenuFromKeyboard: () => !firstPersonController.isActive(),
+      canOpenMenuFromKeyboard: () =>
+        !firstPersonController.isActive()
+        && !roadTool.isEnabled()
+        && !buildingTool.isEnabled()
+        && !burgageTool.isEnabled(),
       onExportGameState: () => this.exportGameState(),
       onImportGameState: () => this.importGameState(),
     });
@@ -328,6 +355,18 @@ export class App {
           await this.spacetimeStore.demolishBuilding(buildingId);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Demolition failed.';
+          this.toastManager?.show(message, { variant: 'error' });
+        }
+      },
+      onDemolishBurgageZone: async (zoneId) => {
+        if (!this.spacetimeStore?.isConnected) {
+          this.toastManager?.show('SpacetimeDB is not connected.', { variant: 'error' });
+          return;
+        }
+        try {
+          await this.spacetimeStore.demolishBurgageZone(zoneId);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Residence demolition failed.';
           this.toastManager?.show(message, { variant: 'error' });
         }
       },
@@ -388,6 +427,7 @@ export class App {
     this.burgageTool = burgageTool;
     this.buildingMarkers = buildingMarkers;
     this.residenceMarkers = residenceMarkers;
+    this.burgageFencing = burgageFencing;
     this.toolbar = toolbar;
     this.toastManager = toastManager;
     this.resourceInspector = resourceInspector;
@@ -453,6 +493,7 @@ export class App {
     this.burgageTool?.dispose();
     this.buildingMarkers?.dispose();
     this.residenceMarkers?.dispose();
+    this.burgageFencing?.dispose();
     this.gameRuntime?.dispose();
     this.resourceInspector?.dispose();
     this.quarryMapIcons?.dispose();
@@ -478,6 +519,7 @@ export class App {
     this.lastTime = time;
 
     const firstPersonActive = this.firstPersonController?.isActive() ?? false;
+    this.syncBuildInteractionPerf();
     if (firstPersonActive) {
       this.firstPersonController?.update(dt);
       this.toolbar?.setFirstPersonMode(true);
@@ -513,6 +555,10 @@ export class App {
       this.gameState.residences.values(),
       (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
     );
+    this.burgageFencing?.syncZones(
+      this.gameState.burgageZones.values(),
+      (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
+    );
     this.syncPlacedBuildingTerrain({ forceMeshUpdate: true });
     this.syncResourceUi();
     this.exposeDevHandles();
@@ -540,6 +586,13 @@ export class App {
     };
     this.toolbar.setStats(stats);
     this.updateBuildButtonPosition();
+  }
+
+  private syncBuildInteractionPerf(): void {
+    const roadDraft = Boolean(this.roadTool?.isEnabled() && this.roadTool.hasDraft());
+    const burgageDraft = Boolean(this.burgageTool?.isEnabled() && this.burgageTool.hasDraft());
+    const buildingActive = Boolean(this.buildingTool?.isEnabled());
+    this.sceneManager?.setBuildInteractionActive(roadDraft || burgageDraft || buildingActive);
   }
 
   private updateBuildButtonPosition(): void {
@@ -619,6 +672,10 @@ export class App {
 
     this.residenceMarkers?.syncResidences(
       state.residences.values(),
+      (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
+    );
+    this.burgageFencing?.syncZones(
+      state.burgageZones.values(),
       (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
     );
 

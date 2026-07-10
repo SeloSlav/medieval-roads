@@ -5,10 +5,15 @@ import type { RoadSelection } from './RoadSelection.ts';
 import type { SceneManager } from '../scene/SceneManager.ts';
 import { RoadPreview } from './RoadPreview.ts';
 import {
-  isRoadPlacementValid,
   validateRoadPlacement,
+  isRoadPlacementValid,
   type RoadPlacementFailureReason,
+  type RoadPlacementResult,
 } from './RoadPlacementValidation.ts';
+import { downsamplePath } from '../utils/pathGeometry.ts';
+import { ROAD_PLACED_SAMPLE_SPACING } from './RoadMeshBuilder.ts';
+import { computePendingRoadAutoCurve, mergeManualAndAutoCurve } from './roadAutoCurve.ts';
+import type { GameState } from '../resources/types.ts';
 
 const ROAD_WIDTH = 4.2;
 const MIN_POINT_DISTANCE = 1.05;
@@ -17,6 +22,11 @@ const CURVE_WHEEL_STEP = 1.35;
 const MAX_CURVE_OFFSET = 34;
 const CURVE_EPSILON = 0.05;
 const SNAP_DISTANCE = 5.6;
+const HOVER_PREVIEW_MOVE_THRESHOLD = 0.75;
+const VALIDATION_INTERVAL_MS = 180;
+const PREVIEW_MESH_SAMPLE_SPACING = ROAD_PLACED_SAMPLE_SPACING;
+const PREVIEW_MESH_MAX_SAMPLES = 240;
+const COMMIT_VALIDATION_SAMPLE_SPACING = 1.25;
 
 export type RoadDeleteRequest = {
   edgeId: string;
@@ -40,6 +50,8 @@ export class RoadTool {
     onStateChanged: () => void;
     onDeleteRequested: (request: RoadDeleteRequest | null) => void;
     onPlacementRejected?: (event: RoadPlacementRejectedEvent) => void;
+    onToggle?: () => void;
+    getGameState?: () => GameState | undefined;
   };
   private enabled = false;
   private points: THREE.Vector3[] = [];
@@ -50,6 +62,20 @@ export class RoadTool {
   private undoStack: RoadNetworkSnapshot[] = [];
   private redoStack: RoadNetworkSnapshot[] = [];
   private readonly preview: RoadPreview;
+  private lastHoverPreviewX = Number.NaN;
+  private lastHoverPreviewZ = Number.NaN;
+  private cachedDraftValidation: RoadPlacementResult | null = null;
+  private lastValidationTime = 0;
+  private validationDirty = true;
+  private pointerClientX = 0;
+  private pointerClientY = 0;
+  private pointerDirty = false;
+  private validationScheduled = false;
+  private readonly previewSampleScratch: THREE.Vector3[] = [];
+  private readonly validationPathScratch: THREE.Vector3[] = [];
+  private readonly anchorScratch: THREE.Vector3[] = [];
+  private readonly curveScratch: number[] = [];
+  private readonly projectScratch = new THREE.Vector3();
 
   constructor(options: {
     domElement: HTMLElement;
@@ -61,6 +87,8 @@ export class RoadTool {
     onStateChanged: () => void;
     onDeleteRequested: (request: RoadDeleteRequest | null) => void;
     onPlacementRejected?: (event: RoadPlacementRejectedEvent) => void;
+    onToggle?: () => void;
+    getGameState?: () => GameState | undefined;
   }) {
     this.options = options;
     this.preview = new RoadPreview(options.sceneManager.roadMeshBuilder, options.sceneManager.materials);
@@ -80,7 +108,7 @@ export class RoadTool {
   }
 
   isDraftBuildable(): boolean {
-    return isRoadPlacementValid(this.buildDraftPath(), this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH);
+    return this.cachedDraftValidation?.ok ?? false;
   }
 
   setEnabled(enabled: boolean): void {
@@ -100,10 +128,11 @@ export class RoadTool {
   getBuildButtonPosition(): { clientX: number; clientY: number } | null {
     if (!this.enabled || !this.isDraftBuildable()) return null;
     const lastPoint = this.points[this.points.length - 1];
+    if (!lastPoint) return null;
     const rect = this.options.domElement.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
 
-    const projected = lastPoint.clone();
+    const projected = this.projectScratch.copy(lastPoint);
     projected.y += 1.2;
     projected.project(this.options.sceneManager.camera);
     if (projected.z < -1 || projected.z > 1) return null;
@@ -114,11 +143,21 @@ export class RoadTool {
     };
   }
 
-  update(_dt: number): void {}
+  update(_dt: number): void {
+    if (!this.enabled || !this.hasDraft()) return;
+    if (this.pointerDirty) {
+      this.pointerDirty = false;
+      this.processPointerHover(this.pointerClientX, this.pointerClientY);
+      return;
+    }
+    this.maybeRunDeferredValidation(false);
+  }
 
   commitDraft(): void {
     const path = this.buildDraftPath();
-    if (!isRoadPlacementValid(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH)) return;
+    const meshBuilder = this.options.sceneManager.roadMeshBuilder;
+    const sampledPath = meshBuilder.samplePath(path, COMMIT_VALIDATION_SAMPLE_SPACING);
+    if (!isRoadPlacementValid(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH, { sampledPath })) return;
     const snapshot = this.options.network.snapshot();
     const added = this.options.network.addRoadPath(path, ROAD_WIDTH);
     if (added.length === 0) return;
@@ -212,10 +251,22 @@ export class RoadTool {
 
   private readonly onPointerMove = (event: MouseEvent): void => {
     if (!this.enabled || !this.hasDraft()) return;
-    const hit = this.options.terrainProjector.pick(event.clientX, event.clientY);
+    this.pointerClientX = event.clientX;
+    this.pointerClientY = event.clientY;
+    this.pointerDirty = true;
+  };
+
+  private processPointerHover(clientX: number, clientY: number): void {
+    const hit = this.options.terrainProjector.pick(clientX, clientY);
     if (!hit) return;
-    this.hoverPoint = this.applySnap(hit);
-    this.refreshPreview();
+    const snapped = this.applySnap(hit);
+    if (this.shouldSkipHoverPreview(snapped)) return;
+    this.hoverPoint = snapped;
+    this.lastHoverPreviewX = snapped.x;
+    this.lastHoverPreviewZ = snapped.z;
+    this.refreshPreviewVisual();
+    this.validationDirty = true;
+    this.scheduleDeferredValidation();
   };
 
   private readonly onWheel = (event: WheelEvent): void => {
@@ -241,10 +292,12 @@ export class RoadTool {
     const key = event.key.toLowerCase();
     if (key === 'r') {
       event.preventDefault();
-      this.setEnabled(true);
+      if (this.options.onToggle) this.options.onToggle();
+      else this.setEnabled(!this.enabled);
       return;
     }
     if (key === 'escape') {
+      event.preventDefault();
       if (this.hasDraft()) this.cancelDraft();
       else if (this.enabled) this.setEnabled(false);
       return;
@@ -272,12 +325,13 @@ export class RoadTool {
     const last = this.points[this.points.length - 1];
     if (last) {
       if (distanceXZ(last, point) < MIN_POINT_DISTANCE) return;
-      this.segmentCurves.push(this.pendingCurve);
+      this.segmentCurves.push(this.getEffectivePendingCurve(last, point));
     }
     this.points.push(point.clone());
     this.pendingCurve = 0;
     this.hoverPoint = null;
     this.latestSnapPoint = null;
+    this.resetHoverPreviewCache();
     this.refreshPreview();
     this.options.onStateChanged();
   }
@@ -289,6 +343,7 @@ export class RoadTool {
     this.pendingCurve = 0;
     this.hoverPoint = null;
     this.latestSnapPoint = null;
+    this.resetHoverPreviewCache();
     if (this.points.length === 0) this.cancelDraft();
     else {
       this.refreshPreview();
@@ -310,23 +365,133 @@ export class RoadTool {
   }
 
   private refreshPreview(): void {
+    this.refreshPreviewVisual();
+    this.runValidation(true);
+  }
+
+  private refreshPreviewVisual(): void {
     if (!this.hasDraft()) {
       this.preview.clear();
+      this.cachedDraftValidation = null;
       return;
     }
+
+    const { anchors, path } = this.buildPreviewAnchors();
+    const valid = this.cachedDraftValidation?.ok ?? true;
+    if (path.length < 2) {
+      this.preview.update(path, valid, ROAD_WIDTH, this.latestSnapPoint, anchors);
+      return;
+    }
+
+    const meshBuilder = this.options.sceneManager.roadMeshBuilder;
+    meshBuilder.samplePathInto(
+      path,
+      PREVIEW_MESH_SAMPLE_SPACING,
+      this.previewSampleScratch,
+      PREVIEW_MESH_MAX_SAMPLES,
+    );
+    this.preview.update(path, valid, ROAD_WIDTH, this.latestSnapPoint, anchors, this.previewSampleScratch);
+  }
+
+  private scheduleDeferredValidation(): void {
+    if (this.validationScheduled) return;
+    this.validationScheduled = true;
+    requestAnimationFrame(() => {
+      this.validationScheduled = false;
+      this.maybeRunDeferredValidation(false);
+    });
+  }
+
+  private maybeRunDeferredValidation(force: boolean): void {
+    if (!this.hasDraft()) return;
+    if (!force && !this.validationDirty) return;
+    const now = performance.now();
+    if (!force && now - this.lastValidationTime < VALIDATION_INTERVAL_MS) return;
+    this.runValidation(force);
+  }
+
+  private runValidation(_force: boolean): void {
+    if (!this.hasDraft()) return;
+    const { path } = this.buildPreviewAnchors();
+    if (path.length < 2) {
+      this.cachedDraftValidation = { ok: false, reason: 'too_short' };
+      this.validationDirty = false;
+      this.preview.setValidity(false);
+      return;
+    }
+
+    if (this.previewSampleScratch.length < 2) {
+      const meshBuilder = this.options.sceneManager.roadMeshBuilder;
+      meshBuilder.samplePathInto(
+        path,
+        PREVIEW_MESH_SAMPLE_SPACING,
+        this.previewSampleScratch,
+        PREVIEW_MESH_MAX_SAMPLES,
+      );
+    }
+
+    const validationSample = downsamplePath(this.previewSampleScratch, 2.5, this.validationPathScratch);
+    const rockCheckPath = downsamplePath(validationSample, 4.0);
+    const validation = validateRoadPlacement(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH, {
+      sampledPath: validationSample,
+      rockCheckPath,
+    });
+    this.cachedDraftValidation = validation;
+    this.validationDirty = false;
+    this.lastValidationTime = performance.now();
+    this.preview.setValidity(validation.ok);
+  }
+
+  private buildPreviewAnchors(): { anchors: THREE.Vector3[]; path: THREE.Vector3[] } {
     const hover = this.getUsableHoverPoint();
-    const anchors = hover ? [...this.points, hover] : [...this.points];
-    const curves = hover ? [...this.segmentCurves, this.pendingCurve] : this.segmentCurves;
-    const path = this.buildPathFromAnchors(anchors, curves);
-    const valid = isRoadPlacementValid(path, this.options.sceneManager, ROAD_WIDTH, MIN_COMMIT_LENGTH);
-    this.preview.update(path, valid, ROAD_WIDTH, this.latestSnapPoint, anchors);
+    this.anchorScratch.length = 0;
+    this.anchorScratch.push(...this.points);
+    if (hover) this.anchorScratch.push(hover);
+
+    this.curveScratch.length = 0;
+    this.curveScratch.push(...this.segmentCurves);
+    if (hover) {
+      const lastAnchor = this.anchorScratch[this.anchorScratch.length - 2];
+      this.curveScratch.push(
+        lastAnchor
+          ? this.getEffectivePendingCurve(lastAnchor, hover)
+          : this.pendingCurve,
+      );
+    }
+
+    const path = this.buildPathFromAnchors(this.anchorScratch, this.curveScratch);
+    return { anchors: this.anchorScratch, path };
+  }
+
+  private getEffectivePendingCurve(start: THREE.Vector3, end: THREE.Vector3): number {
+    const autoCurve = computePendingRoadAutoCurve(
+      start,
+      end,
+      this.options.getGameState?.(),
+      ROAD_WIDTH * 0.5,
+      MAX_CURVE_OFFSET,
+    );
+    return clampCurve(mergeManualAndAutoCurve(this.pendingCurve, autoCurve));
+  }
+
+  private shouldSkipHoverPreview(point: THREE.Vector3): boolean {
+    const dx = point.x - this.lastHoverPreviewX;
+    const dz = point.z - this.lastHoverPreviewZ;
+    if (!Number.isFinite(this.lastHoverPreviewX)) return false;
+    return Math.hypot(dx, dz) < HOVER_PREVIEW_MOVE_THRESHOLD;
+  }
+
+  private resetHoverPreviewCache(): void {
+    this.lastHoverPreviewX = Number.NaN;
+    this.lastHoverPreviewZ = Number.NaN;
+    this.pointerDirty = false;
   }
 
   private applySnap(point: THREE.Vector3): THREE.Vector3 {
     const networkSnap = this.options.network.findSnap(point, SNAP_DISTANCE);
     const draftSnap = this.findDraftSnap(point, SNAP_DISTANCE);
     const snap = pickNearestSnap(networkSnap, draftSnap);
-    this.latestSnapPoint = snap?.point.clone() ?? null;
+    this.latestSnapPoint = snap ? snap.point.clone() : null;
     if (snap) return snap.point.clone();
     return this.options.sceneManager.terrain.getPointAt(point.x, point.z, 0);
   }
@@ -339,7 +504,7 @@ export class RoadTool {
       const anchor = this.points[i];
       const distance = distanceXZ(point, anchor);
       if (distance <= maxDistance && (!best || distance < best.distance)) {
-        best = { point: anchor.clone(), distance };
+        best = { point: anchor, distance };
       }
     }
     return best;
@@ -351,6 +516,9 @@ export class RoadTool {
     this.pendingCurve = 0;
     this.hoverPoint = null;
     this.latestSnapPoint = null;
+    this.cachedDraftValidation = null;
+    this.validationDirty = true;
+    this.resetHoverPreviewCache();
     this.preview.clear();
     this.options.onDeleteRequested(null);
     if (notify) this.options.onStateChanged();
@@ -401,9 +569,10 @@ export class RoadTool {
   private getInvalidClickExitReason(): RoadPlacementFailureReason | null {
     const hover = this.getUsableHoverPoint();
     if (!hover || !this.hasDraft()) return null;
+    const last = this.points[this.points.length - 1];
     const path = this.buildPathFromAnchors(
       [...this.points, hover],
-      [...this.segmentCurves, this.pendingCurve],
+      [...this.segmentCurves, this.getEffectivePendingCurve(last, hover)],
     );
     if (path.length < 2) return null;
 

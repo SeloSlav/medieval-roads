@@ -14,6 +14,7 @@ const PREVIEW_RENDER_ORDER = 12;
 const PREVIEW_HEIGHT: Record<BuildingKind, number> = {
   lumber_mill: 6.5,
   reforester: 4.2,
+  woodcutters_lodge: 4.2,
   stone_quarry: 5.8,
 };
 
@@ -75,6 +76,7 @@ function createPreviewFootprintGeometry(
     case 'lumber_mill':
       return new THREE.BoxGeometry(params.radiusX * 2 * scale, height, params.radiusZ * 2 * scale);
     case 'reforester':
+    case 'woodcutters_lodge':
       return new THREE.BoxGeometry(params.radiusX * 2 * scale, height, params.radiusZ * 2 * scale);
     default: {
       const unreachable: never = kind;

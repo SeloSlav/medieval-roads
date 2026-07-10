@@ -7,7 +7,7 @@ import { subscribeTipCardsPreference } from './tipCardsPreference.ts';
 export type ToolbarStats = {
   canBuild: boolean;
   hasDraft: boolean;
-  mode: 'road' | 'lumber_mill' | 'reforester' | 'stone_quarry' | 'residences' | 'idle';
+  mode: 'road' | 'lumber_mill' | 'reforester' | 'woodcutters_lodge' | 'stone_quarry' | 'residences' | 'idle';
   statusDetail?: string | null;
 };
 
@@ -22,6 +22,7 @@ export class BuildToolbar {
   private readonly roadButton: HTMLButtonElement;
   private readonly lumberMillButton: HTMLButtonElement;
   private readonly reforesterButton: HTMLButtonElement;
+  private readonly woodcuttersLodgeButton: HTMLButtonElement;
   private readonly stoneQuarryButton: HTMLButtonElement;
   private readonly residencesButton: HTMLButtonElement;
   private readonly buildButton: HTMLButtonElement;
@@ -43,6 +44,9 @@ export class BuildToolbar {
   private readonly gameMenu: GameMenu;
   private readonly unsubscribeTipsPreference: () => void;
   private firstPersonActive = false;
+  private buildButtonVisible = false;
+  private lastBuildLeft = Number.NaN;
+  private lastBuildTop = Number.NaN;
   private hudMode: ToolbarStats['mode'] = 'idle';
   private deleteCancel: (() => void) | null = null;
   private deleteRemove: (() => void) | null = null;
@@ -54,6 +58,7 @@ export class BuildToolbar {
       onBuildRoad: () => void;
       onToggleLumberMill: () => void;
       onToggleReforester: () => void;
+      onToggleWoodcuttersLodge: () => void;
       onToggleStoneQuarry: () => void;
       onToggleResidences: () => void;
       onMenuOpenChange?: (open: boolean) => void;
@@ -156,6 +161,9 @@ export class BuildToolbar {
         <button type="button" class="road-tool-button" data-action="reforester" title="Place reforester">
           Reforester
         </button>
+        <button type="button" class="road-tool-button" data-action="woodcutters-lodge" title="Place woodcutter's lodge">
+          Woodcutter's lodge
+        </button>
         <button type="button" class="road-tool-button" data-action="stone-quarry" title="Place stonecutter's camp">
           Stonecutter's camp
         </button>
@@ -201,6 +209,7 @@ export class BuildToolbar {
     this.roadButton = this.mustButton(root, '[data-action="road"]');
     this.lumberMillButton = this.mustButton(root, '[data-action="lumber-mill"]');
     this.reforesterButton = this.mustButton(root, '[data-action="reforester"]');
+    this.woodcuttersLodgeButton = this.mustButton(root, '[data-action="woodcutters-lodge"]');
     this.stoneQuarryButton = this.mustButton(root, '[data-action="stone-quarry"]');
     this.residencesButton = this.mustButton(root, '[data-action="residences"]');
     this.buildButton = this.mustButton(root, '[data-action="build"]');
@@ -223,6 +232,7 @@ export class BuildToolbar {
     this.roadButton.addEventListener('click', handlers.onOpenRoads);
     this.lumberMillButton.addEventListener('click', handlers.onToggleLumberMill);
     this.reforesterButton.addEventListener('click', handlers.onToggleReforester);
+    this.woodcuttersLodgeButton.addEventListener('click', handlers.onToggleWoodcuttersLodge);
     this.stoneQuarryButton.addEventListener('click', handlers.onToggleStoneQuarry);
     this.residencesButton.addEventListener('click', handlers.onToggleResidences);
     this.buildButton.addEventListener('click', handlers.onBuildRoad);
@@ -241,6 +251,7 @@ export class BuildToolbar {
     const roadMode = stats.mode === 'road';
     const lumberMode = stats.mode === 'lumber_mill';
     const reforesterMode = stats.mode === 'reforester';
+    const woodcuttersLodgeMode = stats.mode === 'woodcutters_lodge';
     const stoneQuarryMode = stats.mode === 'stone_quarry';
     const residencesMode = stats.mode === 'residences';
     this.roadButton.classList.toggle('is-active', roadMode);
@@ -249,6 +260,8 @@ export class BuildToolbar {
     this.lumberMillButton.setAttribute('aria-pressed', String(lumberMode));
     this.reforesterButton.classList.toggle('is-active', reforesterMode);
     this.reforesterButton.setAttribute('aria-pressed', String(reforesterMode));
+    this.woodcuttersLodgeButton.classList.toggle('is-active', woodcuttersLodgeMode);
+    this.woodcuttersLodgeButton.setAttribute('aria-pressed', String(woodcuttersLodgeMode));
     this.stoneQuarryButton.classList.toggle('is-active', stoneQuarryMode);
     this.stoneQuarryButton.setAttribute('aria-pressed', String(stoneQuarryMode));
     this.residencesButton.classList.toggle('is-active', residencesMode);
@@ -275,16 +288,25 @@ export class BuildToolbar {
 
   setBuildButtonPosition(position: { clientX: number; clientY: number } | null, visible: boolean): void {
     if (!visible || !position) {
+      if (!this.buildButtonVisible) return;
       this.buildButton.hidden = true;
+      this.buildButtonVisible = false;
+      this.lastBuildLeft = Number.NaN;
+      this.lastBuildTop = Number.NaN;
       return;
     }
 
     const size = 44;
     const margin = 10;
     const gap = 12;
-    const left = Math.max(margin, Math.min(window.innerWidth - size - margin, position.clientX + gap));
-    const top = Math.max(margin, Math.min(window.innerHeight - size - margin, position.clientY - size - gap));
+    const left = Math.round(Math.max(margin, Math.min(window.innerWidth - size - margin, position.clientX + gap)));
+    const top = Math.round(Math.max(margin, Math.min(window.innerHeight - size - margin, position.clientY - size - gap)));
+    if (this.buildButtonVisible && left === this.lastBuildLeft && top === this.lastBuildTop) return;
+
     this.buildButton.hidden = false;
+    this.buildButtonVisible = true;
+    this.lastBuildLeft = left;
+    this.lastBuildTop = top;
     this.buildButton.style.left = `${left}px`;
     this.buildButton.style.top = `${top}px`;
   }
@@ -328,6 +350,7 @@ export class BuildToolbar {
     return mode === 'road'
       || mode === 'lumber_mill'
       || mode === 'reforester'
+      || mode === 'woodcutters_lodge'
       || mode === 'stone_quarry'
       || mode === 'residences';
   }
@@ -340,6 +363,8 @@ export class BuildToolbar {
         return 'Lumber mill';
       case 'reforester':
         return 'Reforester';
+      case 'woodcutters_lodge':
+        return "Woodcutter's lodge";
       case 'stone_quarry':
         return "Stonecutter's camp";
       case 'residences':
@@ -397,12 +422,15 @@ export class BuildToolbar {
           <li><span>Frontage start</span><span class="road-controls-key">1st click</span></li>
           <li><span>Frontage end</span><span class="road-controls-key">2nd click</span></li>
           <li><span>Set depth</span><span class="road-controls-key">3rd click</span></li>
+          <li><span>Close rectangle</span><span class="road-controls-key">4th click</span></li>
           <li><span>Change plot count</span><span class="road-controls-key">+ / −</span></li>
           <li><span>Rotate frontage</span><span class="road-controls-key">F</span></li>
           <li><span>Build zone</span><span class="road-controls-key">Hammer or Enter</span></li>
+          <li><span>Cancel / exit</span><span class="road-controls-key">Esc</span></li>
         `;
       case 'lumber_mill':
       case 'reforester':
+      case 'woodcutters_lodge':
       case 'stone_quarry':
         return `
           <li><span>Place building</span><span class="road-controls-key">L-click</span></li>
@@ -424,11 +452,14 @@ export class BuildToolbar {
     if (stats.mode === 'reforester') {
       return `Click terrain to place a reforester (${formatBuildingCost(getBuildingCost('reforester'))})`;
     }
+    if (stats.mode === 'woodcutters_lodge') {
+      return `Click terrain to place a woodcutter's lodge (${formatBuildingCost(getBuildingCost('woodcutters_lodge'))})`;
+    }
     if (stats.mode === 'stone_quarry') {
       return `Click terrain to place a stonecutter's camp (${formatBuildingCost(getBuildingCost('stone_quarry'))})`;
     }
     if (stats.mode === 'residences') {
-      return stats.statusDetail ?? 'Click two road-frontage corners, then click depth to close the rectangle';
+      return stats.statusDetail ?? 'Click four corners — the 4th click closes the rectangle back to the 1st';
     }
     if (stats.mode !== 'road') return 'Road tool off';
     if (stats.canBuild) return 'Ready to build';

@@ -31,9 +31,47 @@ const HOUSE_SETBACK: f64 = 3.5;
 const MAIN_HOUSE_WIDTH: f64 = 6.6;
 const MAIN_HOUSE_DEPTH: f64 = 7.4;
 const MIN_PARCEL_DEPTH: f64 = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + 2.5;
+const ZONE_BOUNDARY_EPSILON: f64 = 0.12;
 
 pub fn suggest_plot_count(frontage_length: f64) -> u32 {
     (frontage_length / MIN_PLOT_FRONTAGE).floor().max(1.0) as u32
+}
+
+pub fn zone_corners_polygon(corners: &ZoneCorners) -> [Point2; 4] {
+    [corners.a, corners.b, corners.c, corners.d]
+}
+
+pub fn convex_zones_overlap(a: &[Point2; 4], b: &[Point2; 4]) -> bool {
+    convex_polygons_overlap(a, b, ZONE_BOUNDARY_EPSILON)
+}
+
+const BUILDING_FOOTPRINT_SCALE: f64 = 0.9;
+
+pub fn building_footprint_polygon(x: f64, z: f64, pick_radius: f64) -> [Point2; 4] {
+    let radius = pick_radius * BUILDING_FOOTPRINT_SCALE;
+    [
+        Point2 {
+            x: x - radius,
+            z: z - radius,
+        },
+        Point2 {
+            x: x + radius,
+            z: z - radius,
+        },
+        Point2 {
+            x: x + radius,
+            z: z + radius,
+        },
+        Point2 {
+            x: x - radius,
+            z: z + radius,
+        },
+    ]
+}
+
+pub fn zone_overlaps_footprint(zone: &[Point2; 4], x: f64, z: f64, pick_radius: f64) -> bool {
+    let footprint = building_footprint_polygon(x, z, pick_radius);
+    convex_polygons_overlap(zone, &footprint, ZONE_BOUNDARY_EPSILON)
 }
 
 pub fn compute_burgage_layout(
@@ -244,4 +282,77 @@ fn footprint_fits(center: &Point2, yaw: f64, polygon: &[Point2]) -> bool {
         };
         is_point_in_polygon(&world, polygon)
     })
+}
+
+fn polygon_centroid(polygon: &[Point2]) -> Point2 {
+    let mut x = 0.0;
+    let mut z = 0.0;
+    for point in polygon {
+        x += point.x;
+        z += point.z;
+    }
+    let count = polygon.len() as f64;
+    Point2 {
+        x: x / count,
+        z: z / count,
+    }
+}
+
+fn point_strictly_inside_polygon(point: &Point2, polygon: &[Point2], boundary_epsilon: f64) -> bool {
+    if !is_point_in_polygon(point, polygon) {
+        return false;
+    }
+    for i in 0..polygon.len() {
+        let start = &polygon[i];
+        let end = &polygon[(i + 1) % polygon.len()];
+        if distance_point_to_segment(point, start, end) <= boundary_epsilon {
+            return false;
+        }
+    }
+    true
+}
+
+fn segments_intersect_properly(
+    a1: &Point2,
+    a2: &Point2,
+    b1: &Point2,
+    b2: &Point2,
+    epsilon: f64,
+) -> bool {
+    let d1 = cross(b1, b2, a1);
+    let d2 = cross(b1, b2, a2);
+    let d3 = cross(a1, a2, b1);
+    let d4 = cross(a1, a2, b2);
+    ((d1 > epsilon && d2 < -epsilon) || (d1 < -epsilon && d2 > epsilon))
+        && ((d3 > epsilon && d4 < -epsilon) || (d3 < -epsilon && d4 > epsilon))
+}
+
+fn convex_polygons_overlap(a: &[Point2], b: &[Point2], boundary_epsilon: f64) -> bool {
+    let centroid_a = polygon_centroid(a);
+    let centroid_b = polygon_centroid(b);
+
+    for point in a.iter().chain(std::iter::once(&centroid_a)) {
+        if point_strictly_inside_polygon(point, b, boundary_epsilon) {
+            return true;
+        }
+    }
+    for point in b.iter().chain(std::iter::once(&centroid_b)) {
+        if point_strictly_inside_polygon(point, a, boundary_epsilon) {
+            return true;
+        }
+    }
+
+    for i in 0..a.len() {
+        let a1 = &a[i];
+        let a2 = &a[(i + 1) % a.len()];
+        for j in 0..b.len() {
+            let b1 = &b[j];
+            let b2 = &b[(j + 1) % b.len()];
+            if segments_intersect_properly(a1, a2, b1, b2, boundary_epsilon) {
+                return true;
+            }
+        }
+    }
+
+    false
 }

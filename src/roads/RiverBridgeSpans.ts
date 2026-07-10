@@ -75,19 +75,26 @@ export function detectBridgeSpans(sampledPath: THREE.Vector3[], ctx: BridgeSampl
 export function maxWetRunLength(sampledPath: THREE.Vector3[], isWaterAt: (x: number, z: number) => boolean): number {
   if (sampledPath.length < 2) return 0;
   const distances = cumulativeDistances(sampledPath);
-  const wet = sampledPath.map((point) => isWaterAt(point.x, point.z));
 
   let best = 0;
-  let index = 0;
-  while (index < wet.length) {
-    if (!wet[index]) {
-      index++;
+  let wetStart = -1;
+  let runStartDist = 0;
+  for (let i = 0; i < sampledPath.length; i++) {
+    const point = sampledPath[i];
+    if (isWaterAt(point.x, point.z)) {
+      if (wetStart < 0) {
+        wetStart = i;
+        runStartDist = distances[i];
+      }
       continue;
     }
-    const start = index;
-    while (index < wet.length && wet[index]) index++;
-    const end = index - 1;
-    best = Math.max(best, distances[end] - distances[start]);
+    if (wetStart >= 0) {
+      best = Math.max(best, distances[i - 1] - runStartDist);
+      wetStart = -1;
+    }
+  }
+  if (wetStart >= 0) {
+    best = Math.max(best, distances[distances.length - 1] - runStartDist);
   }
   return best;
 }

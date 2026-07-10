@@ -1,9 +1,10 @@
 use spacetimedb::{reducer, ReducerContext};
 
-use crate::burgage::{compute_burgage_layout, ZoneCorners};
+use crate::burgage::{compute_burgage_layout, convex_zones_overlap, zone_corners_polygon, ZoneCorners};
 use crate::db::*;
 use crate::economy::{residence_zone_cost, spend};
 use crate::lifecycle::ensure_player_resources;
+use crate::placement_validation::{burgage_zone_overlaps_buildings, is_on_quarry_pit};
 use crate::tables::{BurgageZone, PlayerResources, Residence};
 
 fn player_resources_amount(resources: &PlayerResources) -> crate::economy::ResourceAmount {
@@ -44,28 +45,61 @@ pub fn place_burgage_zone(
     let owner = ctx.sender();
     ensure_player_resources(ctx, owner);
 
-    let layout = compute_burgage_layout(
-        &ZoneCorners {
-            a: crate::burgage::Point2 {
-                x: corner_ax,
-                z: corner_az,
-            },
-            b: crate::burgage::Point2 {
-                x: corner_bx,
-                z: corner_bz,
-            },
-            c: crate::burgage::Point2 {
-                x: corner_cx,
-                z: corner_cz,
-            },
-            d: crate::burgage::Point2 {
-                x: corner_dx,
-                z: corner_dz,
-            },
+    let corners = ZoneCorners {
+        a: crate::burgage::Point2 {
+            x: corner_ax,
+            z: corner_az,
         },
-        frontage_edge,
-        plot_count,
-    )
+        b: crate::burgage::Point2 {
+            x: corner_bx,
+            z: corner_bz,
+        },
+        c: crate::burgage::Point2 {
+            x: corner_cx,
+            z: corner_cz,
+        },
+        d: crate::burgage::Point2 {
+            x: corner_dx,
+            z: corner_dz,
+        },
+    };
+
+    let candidate_polygon = zone_corners_polygon(&corners);
+    for corner in candidate_polygon {
+        if is_on_quarry_pit(ctx, corner.x, corner.z) {
+            return Err("Cannot place residences on a quarry pit.".to_string());
+        }
+    }
+
+    for existing in ctx.db.burgage_zone().iter() {
+        let existing_polygon = [
+            crate::burgage::Point2 {
+                x: existing.corner_ax,
+                z: existing.corner_az,
+            },
+            crate::burgage::Point2 {
+                x: existing.corner_bx,
+                z: existing.corner_bz,
+            },
+            crate::burgage::Point2 {
+                x: existing.corner_cx,
+                z: existing.corner_cz,
+            },
+            crate::burgage::Point2 {
+                x: existing.corner_dx,
+                z: existing.corner_dz,
+            },
+        ];
+        if convex_zones_overlap(&candidate_polygon, &existing_polygon) {
+            return Err("Residence plot overlaps an existing zone.".to_string());
+        }
+    }
+
+    if burgage_zone_overlaps_buildings(ctx, &corners) {
+        return Err("Residence plot overlaps an existing building.".to_string());
+    }
+
+    let layout = compute_burgage_layout(&corners, frontage_edge, plot_count)
     .ok_or_else(|| "Could not fit residences in this zone.".to_string())?;
 
     let cost = residence_zone_cost(layout.plot_count);

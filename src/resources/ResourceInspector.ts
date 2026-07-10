@@ -3,7 +3,7 @@ import type { TerrainProjector } from '../terrain/TerrainProjector.ts';
 import type { SceneManager } from '../scene/SceneManager.ts';
 import { disposeObject3D } from '../utils/dispose.ts';
 import { formatResourceAmount } from './yields.ts';
-import { buildingSalvageRefund, formatBuildingCost, getBuildingCost, STONE_SALVAGE_FRACTION, WOOD_SALVAGE_FRACTION } from './buildingEconomy.ts';
+import { buildingSalvageRefund, formatBuildingCost, getBuildingCost, residenceZoneCost, residenceZoneSalvageRefund, STONE_SALVAGE_FRACTION, WOOD_SALVAGE_FRACTION } from './buildingEconomy.ts';
 import { getBuildingDefinition } from './buildings.ts';
 import type { InspectableTarget, ResourceStockpile } from './types.ts';
 import type { WorldQueries } from './WorldQueries.ts';
@@ -15,6 +15,7 @@ type ResourceInspectorOptions = {
   terrainProjector: TerrainProjector;
   worldQueries: WorldQueries;
   onDemolishBuilding?: (buildingId: string) => void | Promise<void>;
+  onDemolishBurgageZone?: (zoneId: string) => void | Promise<void>;
   isBlocked: () => boolean;
 };
 
@@ -58,7 +59,7 @@ export class ResourceInspector {
           <div>
             <p class="road-controls-eyebrow" data-inspector-eyebrow>Resources</p>
             <h2 class="road-controls-title" data-inspector-title>Select a site</h2>
-            <p class="road-controls-status" data-inspector-status>Click terrain to inspect quarries, buildings, or river access.</p>
+            <p class="road-controls-status" data-inspector-status>Click terrain to inspect quarries, buildings, residences, or river access.</p>
           </div>
         </header>
         <section class="resource-inspector-details" aria-label="Resource details">
@@ -97,8 +98,14 @@ export class ResourceInspector {
   }
 
   private readonly onDemolishClick = (): void => {
-    if (!this.selectedTarget || this.selectedTarget.kind !== 'building') return;
-    void this.options.onDemolishBuilding?.(this.selectedTarget.building.id);
+    if (!this.selectedTarget) return;
+    if (this.selectedTarget.kind === 'building') {
+      void this.options.onDemolishBuilding?.(this.selectedTarget.building.id);
+      return;
+    }
+    if (this.selectedTarget.kind === 'residence') {
+      void this.options.onDemolishBurgageZone?.(this.selectedTarget.zone.id);
+    }
   };
 
   setStockpile(stockpile: ResourceStockpile): void {
@@ -120,6 +127,11 @@ export class ResourceInspector {
       return;
     }
     if (this.selectedTarget.kind === 'building' && latest.kind === 'building' && latest.building.id === this.selectedTarget.building.id) {
+      this.selectedTarget = latest;
+      this.renderTarget(latest);
+      return;
+    }
+    if (this.selectedTarget.kind === 'residence' && latest.kind === 'residence' && latest.zone.id === this.selectedTarget.zone.id) {
       this.selectedTarget = latest;
       this.renderTarget(latest);
       return;
@@ -175,6 +187,10 @@ export class ResourceInspector {
       this.selectedX = target.building.x;
       this.selectedZ = target.building.z;
       this.selectedRadius = target.building.workRadius * 0.42;
+    } else if (target.kind === 'residence') {
+      this.selectedX = target.residence.x;
+      this.selectedZ = target.residence.z;
+      this.selectedRadius = 4.2;
     } else {
       this.selectedX = target.x;
       this.selectedZ = target.z;
@@ -234,6 +250,9 @@ export class ResourceInspector {
           ? `Extracting — ${Math.round(nearestQuarry.remaining)} stone left at site`
           : 'Idle — no quarry stone in range';
         this.status.dataset.state = nearestQuarry ? 'active' : 'idle';
+      } else if (building.kind === 'woodcutters_lodge') {
+        this.status.textContent = 'Idle — wood processing not yet operational';
+        this.status.dataset.state = 'idle';
       } else {
         this.status.textContent = stumpTrees + growingTrees > 0
           ? `Reforesting — ${stumpTrees} stumps, ${growingTrees} growing`
@@ -248,6 +267,12 @@ export class ResourceInspector {
         <li><span>Work radius</span><span>${definition.workRadius} m</span></li>
         <li><span>Harvest interval</span><span>${definition.harvestInterval}s</span></li>
       `
+        : building.kind === 'woodcutters_lodge'
+          ? `
+        <li><span>Kind</span><span>${building.kind}</span></li>
+        <li><span>Build cost</span><span>${formatBuildingCost(cost)}</span></li>
+        <li><span>Role</span><span>Wood processing</span></li>
+      `
         : `
         <li><span>Kind</span><span>${building.kind}</span></li>
         <li><span>Build cost</span><span>${formatBuildingCost(cost)}</span></li>
@@ -255,6 +280,31 @@ export class ResourceInspector {
         <li><span>Mature trees</span><span>${matureTrees}</span></li>
         <li><span>Stumps</span><span>${stumpTrees}</span></li>
         <li><span>Growing saplings</span><span>${growingTrees}</span></li>
+      `;
+      return;
+    }
+
+    if (target.kind === 'residence') {
+      const { residence, zone, residenceCount } = target;
+      const cost = residenceZoneCost(residenceCount);
+      const refund = residenceZoneSalvageRefund(residenceCount);
+      this.eyebrow.textContent = 'Residence';
+      this.title.textContent = residenceCount === 1 ? 'Burgage cottage' : `Burgage zone (${residenceCount} cottages)`;
+      this.status.textContent = residenceCount === 1
+        ? 'Occupied cottage plot'
+        : `${residenceCount} cottages in this zone`;
+      this.status.dataset.state = 'active';
+      this.demolishSection.hidden = false;
+      this.demolishHint.textContent =
+        `Removes the whole zone and salvages about ${refund.wood} wood and ${refund.stone} stone (${Math.round(STONE_SALVAGE_FRACTION * 100)}% stone, ${Math.round(WOOD_SALVAGE_FRACTION * 100)}% wood of ${formatBuildingCost(cost)}).`;
+
+      const nearestRoad = this.options.worldQueries.getNearestRoadNodeDistance(residence.x, residence.z);
+      this.detailList.innerHTML = `
+        <li><span>Zone plots</span><span>${zone.plotCount}</span></li>
+        <li><span>Cottages</span><span>${residenceCount}</span></li>
+        <li><span>Parcel</span><span>#${residence.parcelIndex + 1}</span></li>
+        <li><span>Build cost</span><span>${formatBuildingCost(cost)}</span></li>
+        <li><span>Nearest road</span><span>${nearestRoad == null ? 'None nearby' : `${nearestRoad.toFixed(1)} m`}</span></li>
       `;
       return;
     }

@@ -44,15 +44,25 @@ export class RoadNetwork {
   private nextEdgeId = 1;
 
   findSnap(point: THREE.Vector3, maxDistance = 5.2): SnapTarget | null {
+    if (this.nodes.size === 0 && this.edges.size === 0) return null;
+
     let best: SnapTarget | null = null;
+    const maxDistanceSq = maxDistance * maxDistance;
     for (const node of this.nodes.values()) {
-      const distance = distanceXZ(point, node.position);
-      if (distance <= maxDistance && (!best || distance < best.distance)) {
+      const dx = point.x - node.position.x;
+      const dz = point.z - node.position.z;
+      const distanceSq = dx * dx + dz * dz;
+      if (distanceSq > maxDistanceSq) continue;
+      const distance = Math.sqrt(distanceSq);
+      if (!best || distance < best.distance) {
         best = { kind: 'node', nodeId: node.id, point: node.position.clone(), distance };
       }
     }
+
     for (const edge of this.edges.values()) {
-      const samples = getEdgePath(edge);
+      const samples = edge.controlPoints.length >= 2 ? edge.controlPoints : getEdgePath(edge);
+      if (samples.length < 2) continue;
+      if (!isPointNearPolylineBounds(point, samples, maxDistance)) continue;
       for (let i = 0; i < samples.length - 1; i++) {
         const projection = projectPointToSegmentXZ(point, samples[i], samples[i + 1]);
         if (projection.distance <= maxDistance && (!best || projection.distance < best.distance)) {
@@ -326,6 +336,24 @@ function classify(count: number): JunctionType {
 
 function getEdgePath(edge: RoadEdge): THREE.Vector3[] {
   return edge.sampledPath.length >= 2 ? edge.sampledPath : edge.controlPoints;
+}
+
+function isPointNearPolylineBounds(point: THREE.Vector3, path: THREE.Vector3[], padding: number): boolean {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const sample of path) {
+    if (sample.x < minX) minX = sample.x;
+    if (sample.x > maxX) maxX = sample.x;
+    if (sample.z < minZ) minZ = sample.z;
+    if (sample.z > maxZ) maxZ = sample.z;
+  }
+  minX -= padding;
+  maxX += padding;
+  minZ -= padding;
+  maxZ += padding;
+  return point.x >= minX && point.x <= maxX && point.z >= minZ && point.z <= maxZ;
 }
 
 function simplifyPath(points: THREE.Vector3[], minDistance: number): THREE.Vector3[] {

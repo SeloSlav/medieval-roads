@@ -4,6 +4,7 @@
 mod burgage;
 mod constants;
 mod economy;
+mod placement_validation;
 mod tables;
 mod types;
 mod world_gen;

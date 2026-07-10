@@ -9,7 +9,7 @@ export type ResourceNodeKind = (typeof RESOURCE_NODE_KINDS)[number];
 export const TREE_PHASES = ['stump', 'growing', 'mature'] as const;
 export type TreePhase = (typeof TREE_PHASES)[number];
 
-export const BUILDING_KINDS = ['lumber_mill', 'reforester', 'stone_quarry'] as const;
+export const BUILDING_KINDS = ['lumber_mill', 'reforester', 'woodcutters_lodge', 'stone_quarry'] as const;
 export type BuildingKind = (typeof BUILDING_KINDS)[number];
 
 export type ResourceNodeDefinition = {
@@ -135,6 +135,12 @@ export type InspectableTarget =
       z: number;
       shoreDistance: number;
       onWater: boolean;
+    }
+  | {
+      kind: 'residence';
+      residence: ResidenceState;
+      zone: BurgageZoneState;
+      residenceCount: number;
     };
 
 export function createEmptyStockpile(): ResourceStockpile {

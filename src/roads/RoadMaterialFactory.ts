@@ -10,9 +10,11 @@ export class RoadMaterialFactory {
   readonly riverBank!: MeshStandardNodeMaterial;
   readonly terrain!: MeshStandardNodeMaterial;
   readonly bridgeSupport!: THREE.MeshStandardMaterial;
-  readonly previewValid: THREE.MeshStandardMaterial;
-  readonly previewInvalid: THREE.MeshStandardMaterial;
-  readonly previewBridge: THREE.MeshStandardMaterial;
+  readonly previewValid: THREE.MeshBasicMaterial;
+  readonly previewInvalid: THREE.MeshBasicMaterial;
+  readonly previewBlendValid: THREE.MeshBasicMaterial;
+  readonly previewBlendInvalid: THREE.MeshBasicMaterial;
+  readonly previewBridge: THREE.MeshBasicMaterial;
   readonly selection: THREE.MeshBasicMaterial;
   readonly snap: THREE.MeshBasicMaterial;
   private roadTextures: TextureSet | null = null;
@@ -20,29 +22,32 @@ export class RoadMaterialFactory {
   private terrainBlendTextures: TerrainBlendTextureSet | null = null;
 
   private constructor() {
-    this.previewValid = new THREE.MeshStandardMaterial({
+    this.previewValid = new THREE.MeshBasicMaterial({
       color: 0xc8c5be,
-      emissive: 0x181715,
-      roughness: 0.96,
-      metalness: 0,
       transparent: true,
       opacity: 0.52,
       depthWrite: false,
     });
-    this.previewInvalid = new THREE.MeshStandardMaterial({
+    this.previewInvalid = new THREE.MeshBasicMaterial({
       color: 0xcc4444,
-      emissive: 0x401010,
-      roughness: 0.96,
-      metalness: 0,
       transparent: true,
       opacity: 0.58,
       depthWrite: false,
     });
-    this.previewBridge = new THREE.MeshStandardMaterial({
+    this.previewBlendValid = new THREE.MeshBasicMaterial({
+      color: 0xc8c5be,
+      transparent: true,
+      opacity: 0.3,
+      depthWrite: false,
+    });
+    this.previewBlendInvalid = new THREE.MeshBasicMaterial({
+      color: 0xcc4444,
+      transparent: true,
+      opacity: 0.34,
+      depthWrite: false,
+    });
+    this.previewBridge = new THREE.MeshBasicMaterial({
       color: 0xb8946e,
-      emissive: 0x1a1208,
-      roughness: 0.94,
-      metalness: 0,
       transparent: true,
       opacity: 0.56,
       depthWrite: false,
@@ -85,6 +90,8 @@ export class RoadMaterialFactory {
       this.bridgeSupport,
       this.previewValid,
       this.previewInvalid,
+      this.previewBlendValid,
+      this.previewBlendInvalid,
       this.previewBridge,
       this.selection,
       this.snap,

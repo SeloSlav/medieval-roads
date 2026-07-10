@@ -39,7 +39,9 @@ export const MIN_PLOT_FRONTAGE = 8;
 export const HOUSE_SETBACK = 3.5;
 export const MAIN_HOUSE_WIDTH = 6.6;
 export const MAIN_HOUSE_DEPTH = 7.4;
+export const RESIDENCE_PICK_RADIUS = 5.5;
 export const MIN_PARCEL_DEPTH = MAIN_HOUSE_DEPTH + HOUSE_SETBACK + 2.5;
+export const MIN_ZONE_DEPTH = MIN_PARCEL_DEPTH;
 export const MAX_ROAD_FRONTAGE_DISTANCE = 10;
 
 const CORNER_KEYS = ['a', 'b', 'c', 'd'] as const;
@@ -156,6 +158,32 @@ export function computeBurgageLayout(
     residences,
     totalCost: residenceZoneCostForLayout(residences.length),
   };
+}
+
+/** Try the requested plot count, then fewer, until at least one cottage fits. */
+export function resolveBurgageLayout(
+  corners: BurgageZoneCorners,
+  frontageEdge: BurgageFrontageEdge,
+  requestedPlotCount: number,
+): BurgageLayoutResult | null {
+  const [frontStart, frontEnd] = getZoneEdge(corners, frontageEdge);
+  const frontageLength = Math.hypot(frontEnd.x - frontStart.x, frontEnd.z - frontStart.z);
+  const maxPlotCount = suggestPlotCount(frontageLength);
+  const startCount = Math.max(1, Math.min(maxPlotCount, Math.round(requestedPlotCount)));
+  for (let plotCount = startCount; plotCount >= 1; plotCount -= 1) {
+    const layout = computeBurgageLayout(corners, frontageEdge, plotCount);
+    if (layout && layout.residences.length > 0) return layout;
+  }
+  return null;
+}
+
+export function measureZoneDepth(corners: BurgageZoneCorners, frontageEdge: BurgageFrontageEdge): number {
+  const [frontStart, frontEnd] = getZoneEdge(corners, frontageEdge);
+  const [rearStart, rearEnd] = getZoneEdge(corners, oppositeFrontageEdge(frontageEdge));
+  return Math.min(
+    distancePointToSegment(frontStart, rearStart, rearEnd),
+    distancePointToSegment(frontEnd, rearStart, rearEnd),
+  );
 }
 
 function isValidZoneShape(corners: Point2[]): boolean {
@@ -291,6 +319,30 @@ export function getParcelDividerSegments(layout: BurgageLayoutResult): Array<[Po
     segments.push([parcel.frontRight, parcel.polygon[2]]);
   }
   return segments;
+}
+
+function fenceEdgeKey(a: Point2, b: Point2): string {
+  const ax = a.x.toFixed(2);
+  const az = a.z.toFixed(2);
+  const bx = b.x.toFixed(2);
+  const bz = b.z.toFixed(2);
+  if (ax < bx || (ax === bx && az <= bz)) return `${ax},${az}|${bx},${bz}`;
+  return `${bx},${bz}|${ax},${az}`;
+}
+
+/** Unique parcel perimeter edges — shared lot lines appear once between neighbors. */
+export function getParcelFenceSegments(layout: BurgageLayoutResult): Array<[Point2, Point2]> {
+  const seen = new Map<string, [Point2, Point2]>();
+  for (const parcel of layout.parcels) {
+    const poly = parcel.polygon;
+    for (let i = 0; i < poly.length; i++) {
+      const start = poly[i];
+      const end = poly[(i + 1) % poly.length];
+      const key = fenceEdgeKey(start, end);
+      if (!seen.has(key)) seen.set(key, [start, end]);
+    }
+  }
+  return [...seen.values()];
 }
 
 export { CORNER_KEYS };

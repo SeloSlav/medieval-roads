@@ -13,6 +13,8 @@ import {
 import { buildBridgeSupports } from './BridgeSupports.ts';
 
 const CORE_Y_OFFSET = 0.12;
+/** Matches placed-road centerline sampling in `sampleEdge`. */
+export const ROAD_PLACED_SAMPLE_SPACING = 1.15;
 /** Slightly above core so the transparent shoulder clears the terrain depth buffer. */
 const BLEND_Y_OFFSET = 0.16;
 const BRIDGE_Y_OFFSET = 0.22;
@@ -31,6 +33,8 @@ export class RoadMeshBuilder {
   private readonly terrain: Terrain;
   private readonly materials: RoadMaterialFactory;
   private readonly bridgeCtx: BridgeSamplingContext | null;
+  private readonly curveScratch = new THREE.CatmullRomCurve3([]);
+  private readonly curvePointScratch = new THREE.Vector3();
 
   constructor(terrain: Terrain, materials: RoadMaterialFactory, bridgeCtx?: BridgeSamplingContext) {
     this.terrain = terrain;
@@ -90,23 +94,77 @@ export class RoadMeshBuilder {
     return group;
   }
 
-  buildPreview(points: THREE.Vector3[], width: number, valid: boolean): THREE.Mesh | null {
-    const sampled = this.samplePath(points, 1.25);
+  buildPreview(
+    points: THREE.Vector3[],
+    width: number,
+    valid: boolean,
+    sampledPath?: THREE.Vector3[],
+  ): THREE.Group | null {
+    const sampled = sampledPath ?? this.samplePath(points, ROAD_PLACED_SAMPLE_SPACING);
     if (sampled.length < 2) return null;
 
-    const ribbonPath = sampled.map((point) => point.clone());
-    const spans = this.bridgeCtx ? detectBridgeSpans(ribbonPath, this.bridgeCtx) : [];
-    const hasBridge = spans.length > 0;
-    if (hasBridge) {
-      applyBridgeHeightsToPath(ribbonPath, spans, this.requireBridgeCtx(), 0.13);
-    }
+    const ribbonPath = sampled;
+    const bridgeBlends = new Float32Array(ribbonPath.length);
+    const crossSections = this.buildCrossSections(ribbonPath, width, 'preview', false, bridgeBlends);
 
-    const material = !valid
-      ? this.materials.previewInvalid
-      : hasBridge
-        ? this.materials.previewBridge
-        : this.materials.previewValid;
-    return this.buildSimpleRibbon(ribbonPath, width, material, 0, 'preview', false);
+    const coreMaterial = valid ? this.materials.previewValid : this.materials.previewInvalid;
+    const blendMaterial = valid ? this.materials.previewBlendValid : this.materials.previewBlendInvalid;
+
+    const core = this.buildRibbonFromSections(crossSections, ribbonPath, coreMaterial, bridgeBlends);
+    core.name = 'Road preview core';
+    core.userData.previewPart = 'core';
+    core.castShadow = false;
+    core.receiveShadow = false;
+    core.frustumCulled = false;
+    core.renderOrder = 25;
+
+    const edgeBlend = this.buildEdgeBlend(crossSections, ribbonPath, width, 'preview', {
+      fadeStart: false,
+      fadeEnd: false,
+    });
+    edgeBlend.name = 'Road preview edge blend';
+    edgeBlend.userData.previewPart = 'blend';
+    edgeBlend.material = blendMaterial;
+    edgeBlend.castShadow = false;
+    edgeBlend.receiveShadow = false;
+    edgeBlend.frustumCulled = false;
+    edgeBlend.renderOrder = 24;
+
+    const group = new THREE.Group();
+    group.name = 'Road preview ribbon';
+    group.add(edgeBlend, core);
+    return group;
+  }
+
+  samplePathInto(
+    points: THREE.Vector3[],
+    spacing: number,
+    out: THREE.Vector3[],
+    maxDivisions = 240,
+  ): THREE.Vector3[] {
+    out.length = 0;
+    if (points.length < 2) return out;
+
+    const length = pathLength(points);
+    const curvatureBoost = estimateCurvature(points) * 8;
+    const divisions = THREE.MathUtils.clamp(Math.ceil(length / spacing + curvatureBoost), 8, maxDivisions);
+    this.curveScratch.points = points;
+    const curve = this.curveScratch;
+    curve.curveType = 'centripetal';
+    curve.tension = 0.45;
+
+    for (let i = 0; i <= divisions; i++) {
+      curve.getPoint(i / divisions, this.curvePointScratch);
+      const surface = this.terrain.getPointAt(this.curvePointScratch.x, this.curvePointScratch.z, 0);
+      let sample = out[i];
+      if (!sample) {
+        sample = new THREE.Vector3();
+        out[i] = sample;
+      }
+      sample.copy(surface);
+    }
+    out.length = divisions + 1;
+    return out;
   }
 
   buildSelection(edge: RoadEdge): THREE.Mesh | null {
@@ -122,7 +180,7 @@ export class RoadMeshBuilder {
   }
 
   private sampleEdge(edge: RoadEdge): THREE.Vector3[] {
-    return this.samplePoints(edge.controlPoints, 1.15);
+    return this.samplePoints(edge.controlPoints, ROAD_PLACED_SAMPLE_SPACING);
   }
 
   private samplePoints(points: THREE.Vector3[], spacing: number): THREE.Vector3[] {
@@ -333,11 +391,15 @@ export class RoadMeshBuilder {
 }
 
 function tangentAt(path: THREE.Vector3[], index: number): THREE.Vector3 {
+  return tangentAtInto(path, index, new THREE.Vector3());
+}
+
+function tangentAtInto(path: THREE.Vector3[], index: number, target: THREE.Vector3): THREE.Vector3 {
   const prev = path[Math.max(0, index - 1)];
   const next = path[Math.min(path.length - 1, index + 1)];
-  const tangent = new THREE.Vector3(next.x - prev.x, 0, next.z - prev.z);
-  if (tangent.lengthSq() < 1e-6) return new THREE.Vector3(1, 0, 0);
-  return tangent.normalize();
+  target.set(next.x - prev.x, 0, next.z - prev.z);
+  if (target.lengthSq() < 1e-6) return target.set(1, 0, 0);
+  return target.normalize();
 }
 
 function cumulativeDistances(path: THREE.Vector3[]): number[] {

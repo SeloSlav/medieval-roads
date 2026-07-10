@@ -32,8 +32,17 @@ export function residenceZoneCost(residenceCount: number): BuildingResourceCost 
 export const BUILDING_COSTS: Record<BuildingKind, BuildingResourceCost> = {
   lumber_mill: { wood: 45, stone: 15 },
   reforester: { wood: 35, stone: 10 },
+  woodcutters_lodge: { wood: 40, stone: 12 },
   stone_quarry: { wood: 25, stone: 40 },
 };
+
+export function residenceZoneSalvageRefund(residenceCount: number): BuildingResourceCost {
+  const cost = residenceZoneCost(residenceCount);
+  return {
+    wood: Math.round(cost.wood * WOOD_SALVAGE_FRACTION),
+    stone: Math.round(cost.stone * STONE_SALVAGE_FRACTION),
+  };
+}
 
 export function getBuildingCost(kind: BuildingKind): BuildingResourceCost {
   return BUILDING_COSTS[kind];
