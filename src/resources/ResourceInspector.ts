@@ -69,35 +69,6 @@ export class ResourceInspector {
     options.uiRoot.insertAdjacentHTML(
       'beforeend',
       `
-      <div class="resource-stockpile-hud" data-resource-stockpile aria-label="Resources">
-        <div class="resource-stockpile-item" data-resource="timber" title="Timber across your treasury and building storage (mills, lodges). New construction spends treasury first, then pulls from buildings.">
-          <span class="resource-stockpile-label">Timber</span>
-          <strong data-stockpile="timber">0</strong>
-        </div>
-        <div class="resource-stockpile-item" data-resource="stone" title="Stone in your treasury and quarry camps. Construction spends treasury first, then quarry storage.">
-          <span class="resource-stockpile-label">Stone</span>
-          <strong data-stockpile="stone">0</strong>
-        </div>
-        <div class="resource-stockpile-item" data-resource="firewood" title="Firewood in treasury, woodcutter lodges, and residence stocks combined.">
-          <span class="resource-stockpile-label">Firewood</span>
-          <strong data-stockpile="firewood">0</strong>
-        </div>
-        <div class="resource-stockpile-item resource-stockpile-item--population" data-resource="population" title="Total population: starting townsfolk plus residents who have moved into homes.">
-          <span class="resource-stockpile-label">Population</span>
-          <strong data-stockpile="population">0</strong>
-        </div>
-        <div class="resource-stockpile-item resource-stockpile-item--population" data-resource="housing" title="Residents housed versus total housing capacity. New homes start empty and attract settlers over time.">
-          <span class="resource-stockpile-label">Housing</span>
-          <strong data-stockpile="housing">0/0</strong>
-          <span class="resource-stockpile-sub" data-stockpile="housing-sub">0 vacant</span>
-        </div>
-        <div class="resource-stockpile-item resource-stockpile-item--population" data-resource="labor" title="Workers free to assign. Labor equals population minus workers already assigned to buildings.">
-          <span class="resource-stockpile-label">Labor</span>
-          <strong data-stockpile="labor">0</strong>
-          <span class="resource-stockpile-sub" data-stockpile="labor-sub">available</span>
-        </div>
-      </div>
-
       <aside class="resource-inspector-panel" data-resource-inspector hidden aria-label="Resource inspector">
         <header class="road-controls-header">
           <div>
@@ -139,7 +110,7 @@ export class ResourceInspector {
     this.title = this.mustElement(options.uiRoot, '[data-inspector-title]');
     this.status = this.mustElement(options.uiRoot, '[data-inspector-status]');
     this.detailList = this.mustElement(options.uiRoot, '[data-inspector-details]');
-    this.stockpileRoot = this.mustElement(options.uiRoot, '[data-resource-stockpile]');
+    this.stockpileRoot = this.mustElement(options.uiRoot, '[data-settlement-hud]');
     this.stockpileValues = {
       timber: this.mustElement(options.uiRoot, '[data-stockpile="timber"]'),
       stone: this.mustElement(options.uiRoot, '[data-stockpile="stone"]'),
@@ -266,7 +237,6 @@ export class ResourceInspector {
     this.options.sceneManager.selectionGroup.remove(this.marker);
     disposeObject3D(this.marker);
     this.panel.remove();
-    this.stockpileRoot.remove();
   }
 
   private readonly onPointerDown = (event: MouseEvent): void => {

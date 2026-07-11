@@ -84,14 +84,83 @@ export class BuildToolbar {
   ) {
     root.innerHTML = `
       <div class="hud-right-stack">
-        <div class="fps-panel" data-fps-panel aria-live="polite">
-          <div class="fps-stat">
-            <strong data-stat="fps">--</strong>
-            <span>FPS</span>
+        <div class="settlement-hud" data-settlement-hud data-fps-panel aria-label="Settlement overview" aria-live="polite">
+          <div class="settlement-hud__perf">
+            <div
+              class="settlement-hud__stat settlement-hud__stat--perf"
+              tabindex="0"
+              data-tooltip="Frames per second. Turns amber below 60 and gold at 85 or higher."
+            >
+              <span class="settlement-hud__label">FPS</span>
+              <strong class="settlement-hud__value settlement-hud__value--fps" data-stat="fps">--</strong>
+            </div>
+            <div
+              class="settlement-hud__stat settlement-hud__stat--perf"
+              tabindex="0"
+              data-stat-row="zoom"
+              data-tooltip="Camera zoom level. Scroll the mouse wheel to zoom in and out on the map."
+            >
+              <span class="settlement-hud__label">Zoom</span>
+              <strong class="settlement-hud__value settlement-hud__value--zoom" data-stat="zoom">100%</strong>
+            </div>
           </div>
-          <div class="fps-stat" data-stat-row="zoom">
-            <strong data-stat="zoom">100%</strong>
-            <span>Zoom</span>
+          <div class="settlement-hud__body">
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="timber"
+              data-tooltip="Timber in your treasury plus lumber stored at mills and lodges. Building costs spend treasury first, then pull from building storage."
+            >
+              <span class="settlement-hud__label">Timber</span>
+              <strong class="settlement-hud__value" data-stockpile="timber">0</strong>
+            </div>
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="stone"
+              data-tooltip="Stone in your treasury plus quarry camp storage. Construction spends treasury first, then quarry storage."
+            >
+              <span class="settlement-hud__label">Stone</span>
+              <strong class="settlement-hud__value" data-stockpile="stone">0</strong>
+            </div>
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="firewood"
+              data-tooltip="Firewood held in treasury, woodcutter lodges, and residence stocks combined."
+            >
+              <span class="settlement-hud__label">Firewood</span>
+              <strong class="settlement-hud__value" data-stockpile="firewood">0</strong>
+            </div>
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="population"
+              data-tooltip="Total population: starting townsfolk plus residents who have moved into homes."
+            >
+              <span class="settlement-hud__label">Population</span>
+              <strong class="settlement-hud__value" data-stockpile="population">0</strong>
+            </div>
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="housing"
+              data-tooltip="Residents housed versus total housing capacity. New homes start empty and attract settlers over time."
+            >
+              <span class="settlement-hud__label">Housing</span>
+              <strong class="settlement-hud__value" data-stockpile="housing">0/0</strong>
+              <span class="settlement-hud__sub" data-stockpile="housing-sub">0 vacant</span>
+            </div>
+            <div
+              class="settlement-hud__stat"
+              tabindex="0"
+              data-resource="labor"
+              data-tooltip="Workers free to assign. Labor equals population minus workers already assigned to buildings."
+            >
+              <span class="settlement-hud__label">Labor</span>
+              <strong class="settlement-hud__value" data-stockpile="labor">0</strong>
+              <span class="settlement-hud__sub" data-stockpile="labor-sub">available</span>
+            </div>
           </div>
         </div>
 
@@ -253,7 +322,7 @@ export class BuildToolbar {
     this.deletePopup = this.mustElement(root, '[data-delete-popup]');
     this.removeButton = this.mustButton(root, '[data-action="confirm-delete"]');
     this.cancelDeleteButton = this.mustButton(root, '[data-action="cancel-delete"]');
-    this.fpsPanel = this.mustElement(root, '[data-fps-panel]');
+    this.fpsPanel = this.mustElement(root, '[data-settlement-hud]');
     this.fpsValue = this.mustElement(root, '[data-stat="fps"]');
     this.zoomValue = this.mustElement(root, '[data-stat="zoom"]');
     this.fpModePanel = this.mustElement(root, '[data-fp-mode-panel]');

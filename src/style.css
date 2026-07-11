@@ -54,7 +54,7 @@ button {
 [data-ui-root] .floating-build-button,
 [data-ui-root] .burgage-layout-hud,
 [data-ui-root] .delete-popup,
-[data-ui-root] .resource-stockpile-hud,
+[data-ui-root] .settlement-hud,
 [data-ui-root] .resource-inspector-panel,
 [data-ui-root] .game-menu-backdrop,
 [data-ui-root] .quarry-map-icon,
@@ -190,15 +190,9 @@ button {
   outline: none;
 }
 
-.resource-stockpile-hud {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  z-index: 4;
-  display: flex;
-  flex-wrap: wrap;
+.settlement-hud {
+  display: grid;
   gap: 8px;
-  max-width: calc(100vw - 28px);
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -207,37 +201,111 @@ button {
   backdrop-filter: blur(14px);
 }
 
-.resource-stockpile-item {
+.settlement-hud__perf {
   display: grid;
-  gap: 2px;
-  min-width: 64px;
-  cursor: help;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-.resource-stockpile-label {
+.settlement-hud__body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.settlement-hud__stat {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  cursor: help;
+  outline: none;
+}
+
+.settlement-hud__stat--perf {
+  padding: 2px 0;
+}
+
+.settlement-hud__label {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.resource-stockpile-item strong {
-  font-size: 18px;
+.settlement-hud__value {
+  font-size: 17px;
   font-weight: 750;
   line-height: 1;
   color: var(--accent-2);
 }
 
-.resource-stockpile-item--population {
-  min-width: 88px;
+.settlement-hud__value--fps {
+  color: #a7d77f;
 }
 
-.resource-stockpile-sub {
+.settlement-hud__value--zoom {
+  color: #9ec5e8;
+  font-size: 15px;
+}
+
+.settlement-hud.is-fast .settlement-hud__value--fps {
+  color: var(--accent);
+}
+
+.settlement-hud.is-low .settlement-hud__value--fps {
+  color: var(--danger);
+}
+
+.settlement-hud__sub {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+}
+
+.settlement-hud__stat[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(240px, calc(100vw - 40px));
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  box-shadow: 0 10px 28px var(--shadow);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+}
+
+.settlement-hud__perf .settlement-hud__stat:last-child[data-tooltip]::after,
+.settlement-hud__body .settlement-hud__stat:nth-child(3n)[data-tooltip]::after {
+  left: auto;
+  right: 0;
+}
+
+.settlement-hud__stat[data-tooltip]:hover::after,
+.settlement-hud__stat[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
 .resource-inspector-labor {
@@ -574,7 +642,7 @@ button {
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  width: min(280px, calc(100vw - 28px));
+  width: min(300px, calc(100vw - 28px));
 }
 
 .road-controls-header {
@@ -1071,7 +1139,11 @@ button {
   .hud-right-stack {
     top: 10px;
     right: 10px;
-    width: min(260px, calc(100vw - 20px));
+    width: min(280px, calc(100vw - 20px));
+  }
+
+  .settlement-hud__value {
+    font-size: 15px;
   }
 
   .fp-controls-panel,
