@@ -119,20 +119,27 @@ class WebGPUPostProcessor implements ScenePostProcessor {
     const sceneColor = this.scenePass.getTextureNode('output');
     this.bloomPass = bloom(sceneColor, 0.12, 0.38, 0.82);
     const gradeFn = wgslFn(`
-      fn daylightGrade(inputColor: vec4<f32>, frameUv: vec2<f32>) -> vec4<f32> {
+      fn daylightGrade(
+        inputColor: vec4<f32>,
+        frameUv: vec2<f32>,
+        gradeSaturation: f32,
+        gradeContrast: f32,
+        gradeWarmth: f32,
+        gradeNightBlue: f32,
+        gradeVignette: f32
+      ) -> vec4<f32> {
         ${buildGradeWgslFunctionBody()}
       }
-    `, [
-      this.gradeSaturation,
-      this.gradeContrast,
-      this.gradeWarmth,
-      this.gradeNightBlue,
-      this.gradeVignette,
-    ]);
+    `);
 
     this.pipeline.outputNode = gradeFn({
       frameUv: uv(),
       inputColor: sceneColor.add(this.bloomPass),
+      gradeSaturation: this.gradeSaturation,
+      gradeContrast: this.gradeContrast,
+      gradeWarmth: this.gradeWarmth,
+      gradeNightBlue: this.gradeNightBlue,
+      gradeVignette: this.gradeVignette,
     });
   }
 
