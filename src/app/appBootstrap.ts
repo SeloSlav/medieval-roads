@@ -519,7 +519,6 @@ export async function bootstrapAppSession(
     getGameState: () => liveContext.gameState,
     onQuarrySelect: (quarryId) => resourceInspector.selectQuarry(quarryId),
     onForagingSelect: (nodeId) => resourceInspector.selectForaging(nodeId),
-    onBackyardSelect: (residenceId) => resourceInspector.selectBackyard(residenceId),
     isBlocked: () => isWorldInspectionBlocked(placementGate),
   });
 

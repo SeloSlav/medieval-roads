@@ -218,7 +218,6 @@ export class App {
     this.resourceInspector?.dispose();
     this.worldMapIcons?.quarry.dispose();
     this.worldMapIcons?.foraging.dispose();
-    this.worldMapIcons?.backyard.dispose();
     this.toastManager?.dispose();
     this.disposeTooltips?.();
     this.disposeTooltips = null;
@@ -260,7 +259,6 @@ export class App {
       this.updateBuildButtonPosition();
       this.worldMapIcons?.quarry.update();
       this.worldMapIcons?.foraging.update();
-      this.worldMapIcons?.backyard.update();
       this.sceneManager?.render(dt, 12, true);
     } else {
       this.cameraController?.update(dt);
@@ -272,7 +270,6 @@ export class App {
       this.updateBuildButtonPosition();
       this.worldMapIcons?.quarry.update();
       this.worldMapIcons?.foraging.update();
-      this.worldMapIcons?.backyard.update();
       this.sceneManager?.render(dt, this.cameraController?.getOrbitDistance());
     }
     this.updateFps(time, dt);

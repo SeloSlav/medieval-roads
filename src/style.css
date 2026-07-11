@@ -74,7 +74,6 @@ button {
 [data-ui-root] .game-menu-backdrop,
 [data-ui-root] .quarry-map-icon,
 [data-ui-root] .foraging-map-icon,
-[data-ui-root] .backyard-map-icon,
 [data-ui-root] .toast--clickable,
 [data-ui-root] .builder-status-bar {
   pointer-events: auto;

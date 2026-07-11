@@ -4,6 +4,7 @@ import {
   backyardGardenLabel,
   formatBackyardGardenCost,
   formatBackyardGardenSalvage,
+  getBackyardGardenCost,
   type BackyardGardenKind,
 } from '../../residences/backyardGarden.ts';
 import { ECONOMIC_ACTIVITY_TAX_RATE_DEFAULT } from '../../economy/villageEconomy.ts';
@@ -71,16 +72,16 @@ function renderEmptyBackyardPicker(
 ): InspectorView {
   const options = BACKYARD_GARDEN_KINDS.map((kind) => {
     const def = BACKYARD_GARDEN_DEFINITIONS[kind];
-    const producesFood = def.foodPerPersonPerSec > 0;
-    const blurb = producesFood
-      ? `${Math.round(def.foodSelfShare * 100)}% feeds the household; surplus sells at a road-linked marketplace and builds household wealth`
-      : 'Generates village gold when road-connected to a marketplace; earnings split between household savings and mayor tax';
+    const tag = def.foodPerPersonPerSec > 0 ? 'Food' : 'Market';
+    const cost = getBackyardGardenCost(kind);
     return `
       <li class="backyard-picker-row">
         <button type="button" class="backyard-picker-option" data-inspector-action="place-garden" data-garden-kind="${kind}">
           <span class="backyard-picker-option__title">${backyardGardenLabel(kind)}</span>
-          <span class="backyard-picker-option__cost">${formatBackyardGardenCost(kind)}</span>
-          <span class="backyard-picker-option__hint">${blurb}</span>
+          <span class="backyard-picker-option__meta">
+            <span class="backyard-picker-option__tag">${tag}</span>
+            <span class="backyard-picker-option__cost">${cost.timber}t · ${cost.stone}s</span>
+          </span>
         </button>
       </li>
     `;
@@ -89,7 +90,7 @@ function renderEmptyBackyardPicker(
   return {
     eyebrow: 'Backyard',
     title: 'Empty backyard',
-    statusText: 'Choose what to plant behind the house',
+    statusText: 'Pick a garden type',
     statusState: 'neutral',
     detailsHtml: `
       <li><span>Parcel</span><span>#${parcelIndex + 1} of ${plotCount}</span></li>

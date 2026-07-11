@@ -1,4 +1,3 @@
-import { BackyardMapIcons } from '../map/BackyardMapIcons.ts';
 import { ForagingMapIcons } from '../map/ForagingMapIcons.ts';
 import { QuarryMapIcons } from '../map/QuarryMapIcons.ts';
 import type { GameState } from '../resources/types.ts';
@@ -9,7 +8,6 @@ import type * as THREE from 'three';
 export type WorldMapIconsBundle = {
   quarry: QuarryMapIcons;
   foraging: ForagingMapIcons;
-  backyard: BackyardMapIcons;
 };
 
 export function createWorldMapIcons(options: {
@@ -22,7 +20,6 @@ export function createWorldMapIcons(options: {
   getGameState: () => GameState;
   onQuarrySelect: (quarryId: string) => void;
   onForagingSelect: (nodeId: string) => void;
-  onBackyardSelect: (residenceId: string) => void;
   isBlocked: () => boolean;
 }): WorldMapIconsBundle {
   const {
@@ -35,7 +32,6 @@ export function createWorldMapIcons(options: {
     getGameState,
     onQuarrySelect,
     onForagingSelect,
-    onBackyardSelect,
     isBlocked,
   } = options;
 
@@ -62,18 +58,5 @@ export function createWorldMapIcons(options: {
     isBlocked,
   });
 
-  const backyard = new BackyardMapIcons({
-    uiRoot,
-    domElement,
-    terrain,
-    getCamera,
-    getZoomPercent,
-    getResidences: () => getGameState().residences.values(),
-    getBurgageZones: () => getGameState().burgageZones,
-    getBackyardGardens: () => getGameState().backyardGardens,
-    onBackyardSelect,
-    isBlocked,
-  });
-
-  return { quarry, foraging, backyard };
+  return { quarry, foraging };
 }

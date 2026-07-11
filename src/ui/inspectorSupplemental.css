@@ -1,7 +1,7 @@
 .resource-inspector-supplemental {
   display: grid;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 6px;
+  padding-top: 8px;
   border-top: 1px solid rgba(238, 232, 220, 0.1);
 }
 
@@ -14,7 +14,9 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 8px;
+  gap: 4px;
+  max-height: min(36vh, 220px);
+  overflow-y: auto;
 }
 
 .backyard-picker-row {
@@ -23,14 +25,16 @@
 
 .backyard-picker-option {
   width: 100%;
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
   text-align: left;
   color: inherit;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(238, 232, 220, 0.12);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
 }
 
@@ -41,17 +45,32 @@
 }
 
 .backyard-picker-option__title {
+  font-size: 0.86rem;
   font-weight: 600;
+  line-height: 1.2;
+}
+
+.backyard-picker-option__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 0.76rem;
+  color: rgba(238, 232, 220, 0.68);
+}
+
+.backyard-picker-option__tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(238, 232, 220, 0.72);
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .backyard-picker-option__cost {
-  font-size: 0.86rem;
-  color: rgba(238, 232, 220, 0.72);
-}
-
-.backyard-picker-option__hint {
-  font-size: 0.8rem;
-  color: rgba(238, 232, 220, 0.58);
+  white-space: nowrap;
 }
 
 .inspector-action-panel {

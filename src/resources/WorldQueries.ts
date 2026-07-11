@@ -509,7 +509,7 @@ export class WorldQueries {
     return buildBackyardTarget(state, residence, zone);
   }
 
-  findNearestBackyardTarget(x: number, z: number, radius = 4.5): Extract<InspectableTarget, { kind: 'backyard' }> | null {
+  findNearestBackyardTarget(x: number, z: number, radius = 7): Extract<InspectableTarget, { kind: 'backyard' }> | null {
     const state = this.getGameState();
     let best: Extract<InspectableTarget, { kind: 'backyard' }> | null = null;
     let bestDistance = Infinity;
