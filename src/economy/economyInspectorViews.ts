@@ -1,3 +1,4 @@
+import { isChapelStaffed } from '../logistics/landmarkAccess.ts';
 import type { BackyardGardenKind } from '../generated/gameBalance.ts';
 import { CHAPEL_RECOVERY_NEEDS_REQUIRED } from '../generated/gameBalance.ts';
 import type { BuildingState, ResidenceState } from '../resources/types.ts';
@@ -127,7 +128,7 @@ export function buildChapelInspectorEconomyView(
   cofferCapacity: number,
   collectAction: string,
 ): ChapelInspectorEconomyView {
-  const staffed = building.assignedLabor > 0;
+  const staffed = isChapelStaffed(building);
   const cofferGold = chapelCofferGold(building);
   const cofferFull = cofferGold >= cofferCapacity - 0.05;
   const uncapped = payableParishExpensePerDay(building.assignedLabor, cofferGold);

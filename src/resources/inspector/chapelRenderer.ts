@@ -5,6 +5,7 @@ import {
   formatChapelCommunityBoosts,
   formatChapelExpenseLabel,
 } from '../../economy/economyInspectorViews.ts';
+import { isChapelStaffed } from '../../logistics/landmarkAccess.ts';
 import { CHAPEL_COFFER_CAPACITY } from '../../generated/gameBalance.ts';
 import {
   buildingCostRows,
@@ -37,7 +38,7 @@ export function renderChapelInspector(
   const { building } = target;
   const label = context.worldQueries.getBuildingLabel(building.kind);
   const cost = getBuildingCost(building.kind);
-  const staffed = building.assignedLabor > 0;
+  const staffed = isChapelStaffed(building);
   const connectedHomes = context.worldQueries.countRoadConnectedResidences(building, false);
   const linkedPopulation = context.worldQueries.countRoadConnectedPopulation(building);
   const { settlementBoost, abandonmentGrace } = formatChapelCommunityBoosts();
