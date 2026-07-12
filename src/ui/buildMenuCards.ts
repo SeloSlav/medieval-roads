@@ -101,17 +101,27 @@ export type BuildMenuAction = PlacementBuildMenuAction;
 
 export type BuildMenuEntry = { kind: 'placement'; action: PlacementBuildMenuAction; artKey: PlacementArtKey };
 
-export const BUILD_MENU_ENTRIES: readonly BuildMenuEntry[] = [
+/** Settlement essentials: housing, water, civic buildings, and raw-material extraction. */
+export const BASIC_BUILD_MENU_ENTRIES: readonly BuildMenuEntry[] = [
+  { kind: 'placement', action: 'residences', artKey: 'residences' },
+  { kind: 'placement', action: 'well', artKey: 'well' },
+  { kind: 'placement', action: 'chapel', artKey: 'chapel' },
   { kind: 'placement', action: 'lumber-mill', artKey: 'lumber_mill' },
   { kind: 'placement', action: 'stone-quarry', artKey: 'stone_quarry' },
+];
+
+/** Production chain: forestry, provisioning, and trade buildings. */
+export const INDUSTRY_BUILD_MENU_ENTRIES: readonly BuildMenuEntry[] = [
   { kind: 'placement', action: 'reforester', artKey: 'reforester' },
   { kind: 'placement', action: 'woodcutters-lodge', artKey: 'woodcutters_lodge' },
-  { kind: 'placement', action: 'well', artKey: 'well' },
   { kind: 'placement', action: 'hunters-hall', artKey: 'hunters_hall' },
   { kind: 'placement', action: 'foragers-shed', artKey: 'foragers_shed' },
-  { kind: 'placement', action: 'chapel', artKey: 'chapel' },
   { kind: 'placement', action: 'marketplace', artKey: 'marketplace' },
-  { kind: 'placement', action: 'residences', artKey: 'residences' },
+];
+
+export const BUILD_MENU_ENTRIES: readonly BuildMenuEntry[] = [
+  ...BASIC_BUILD_MENU_ENTRIES,
+  ...INDUSTRY_BUILD_MENU_ENTRIES,
 ];
 
 export type BuildMenuHandlers = {
@@ -119,13 +129,16 @@ export type BuildMenuHandlers = {
   onToggleResidences: () => void;
 };
 
-export function renderBuildMenuCards(): string {
-  return BUILD_MENU_ENTRIES.map(renderBuildMenuEntry).join('');
+export function renderBuildMenuCards(entries: readonly BuildMenuEntry[] = BUILD_MENU_ENTRIES): string {
+  return entries.map(renderBuildMenuEntry).join('');
 }
 
-export function resolveBuildMenuHotkey(key: string): BuildMenuAction | null {
+export function resolveBuildMenuHotkey(
+  key: string,
+  entries: readonly BuildMenuEntry[] = BUILD_MENU_ENTRIES,
+): BuildMenuAction | null {
   const normalized = key.toLowerCase();
-  for (const entry of BUILD_MENU_ENTRIES) {
+  for (const entry of entries) {
     const hotkey = BUILD_CARD_COPY[entry.artKey].hotkey.toLowerCase();
     if (hotkey === normalized) {
       return entry.action;

@@ -14,23 +14,28 @@ import { areTipCardsDisabled, setTipCardsDisabled, subscribeTipCardsPreference }
 import {
   type BuildMenuAction,
   type BuildMenuHandlers,
+  BASIC_BUILD_MENU_ENTRIES,
+  INDUSTRY_BUILD_MENU_ENTRIES,
   renderBuildMenuCards,
   resolveBuildMenuHotkey,
   runBuildMenuAction,
 } from './buildMenuCards.ts';
 import { toolbarModeToMenuAction } from './buildMenuMapping.ts';
+import type { PlacementBuildMenuAction } from './buildMenuCards.ts';
 import type { BuildingKind } from '../generated/gameBalance.ts';
 import {
   describeBuilderHelp,
   describeBuilderTitle,
   describeToolbarStatus,
   isBuilderHudMode,
-  isConstructionToolMode,
   type ToolbarStats,
 } from './buildToolbarStatus.ts';
 import { SettlementHud } from './SettlementHud.ts';
 
 export type { ToolbarStats };
+
+const BASIC_BUILD_MENU_ACTIONS = new Set(BASIC_BUILD_MENU_ENTRIES.map((entry) => entry.action));
+const INDUSTRY_BUILD_MENU_ACTIONS = new Set(INDUSTRY_BUILD_MENU_ENTRIES.map((entry) => entry.action));
 
 type DeletePopupOptions = {
   clientX: number;
@@ -41,12 +46,14 @@ type DeletePopupOptions = {
 
 export class BuildToolbar {
   private readonly roadButton: HTMLButtonElement;
-  private readonly buildMenuButton: HTMLButtonElement;
+  private readonly basicBuildMenuButton: HTMLButtonElement;
+  private readonly industryBuildMenuButton: HTMLButtonElement;
   private readonly waterOverlayButton: HTMLButtonElement;
   private readonly helpButton: HTMLButtonElement;
   private readonly settingsButton: HTMLButtonElement;
   private readonly buildButton: HTMLButtonElement;
-  private readonly buildMenu: HTMLElement;
+  private readonly basicBuildMenu: HTMLElement;
+  private readonly industryBuildMenu: HTMLElement;
   private readonly burgageLayoutHud: HTMLElement;
   private readonly burgagePlotDecreaseButton: HTMLButtonElement;
   private readonly burgagePlotIncreaseButton: HTMLButtonElement;
@@ -70,7 +77,8 @@ export class BuildToolbar {
   private gameMenu: GameMenu | null = null;
   private readonly unsubscribeTipsPreference: () => void;
   private firstPersonActive = false;
-  private buildMenuOpen = false;
+  private basicBuildMenuOpen = false;
+  private industryBuildMenuOpen = false;
   private waterOverlayActive = false;
   private buildButtonVisible = false;
   private burgageLayoutHudVisible = false;
@@ -81,7 +89,8 @@ export class BuildToolbar {
   private hudMode: ToolbarStats['mode'] = 'idle';
   private deleteCancel: (() => void) | null = null;
   private deleteRemove: (() => void) | null = null;
-  private readonly buildMenuToggle: DockToggle;
+  private readonly basicBuildMenuToggle: DockToggle;
+  private readonly industryBuildMenuToggle: DockToggle;
   private readonly waterOverlayToggle: DockToggle;
   private readonly dockToggles: DockToggle[];
   private readonly toolbarHandlers: BuildMenuHandlers & {
@@ -107,18 +116,26 @@ export class BuildToolbar {
       event.stopPropagation();
       return;
     }
-    if (key === 'r' && this.buildMenuOpen) {
-      this.setBuildMenuOpen(false);
+    if (key === 'r' && this.isAnyBuildMenuOpen()) {
+      this.closeAllBuildMenus();
       return;
     }
-    if (!this.buildMenuOpen) return;
+    if (this.basicBuildMenuOpen) {
+      const buildAction = resolveBuildMenuHotkey(key, BASIC_BUILD_MENU_ENTRIES);
+      if (!buildAction) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runBuildMenuAction(buildAction, this.toolbarHandlers, () => this.setBasicBuildMenuOpen(false));
+      return;
+    }
+    if (!this.industryBuildMenuOpen) return;
 
-    const buildAction = resolveBuildMenuHotkey(key);
-    if (!buildAction) return;
+    const industryAction = resolveBuildMenuHotkey(key, INDUSTRY_BUILD_MENU_ENTRIES);
+    if (!industryAction) return;
 
     event.preventDefault();
     event.stopPropagation();
-    runBuildMenuAction(buildAction, this.toolbarHandlers, () => this.setBuildMenuOpen(false));
+    runBuildMenuAction(industryAction, this.toolbarHandlers, () => this.setIndustryBuildMenuOpen(false));
   };
 
   constructor(
@@ -182,16 +199,17 @@ export class BuildToolbar {
               <li><span>Walk mode</span><span class="road-controls-key">~</span></li>
               <li><span>Road tool</span><span class="road-controls-key">R</span></li>
               <li><span>Build menu</span><span class="road-controls-key">B</span></li>
+              <li><span>Industry menu</span><span class="road-controls-key">V</span></li>
+              <li><span>Residence</span><span class="road-controls-key">H</span></li>
+              <li><span>Well</span><span class="road-controls-key">E</span></li>
+              <li><span>Chapel</span><span class="road-controls-key">C</span></li>
               <li><span>Lumber mill</span><span class="road-controls-key">L</span></li>
               <li><span>Stone camp</span><span class="road-controls-key">S</span></li>
               <li><span>Reforester</span><span class="road-controls-key">F</span></li>
               <li><span>Woodcutter</span><span class="road-controls-key">W</span></li>
-              <li><span>Well</span><span class="road-controls-key">E</span></li>
               <li><span>Hunter's hall</span><span class="road-controls-key">K</span></li>
               <li><span>Forager's shed</span><span class="road-controls-key">Y</span></li>
-              <li><span>Chapel</span><span class="road-controls-key">C</span></li>
               <li><span>Marketplace</span><span class="road-controls-key">P</span></li>
-              <li><span>Residence</span><span class="road-controls-key">H</span></li>
             </ul>
           </section>
         </aside>
@@ -224,9 +242,15 @@ export class BuildToolbar {
 
       <div class="builder-status-bar" data-builder-status hidden aria-live="polite"></div>
 
-      <section class="construction-menu" data-build-menu hidden aria-label="Build menu">
+      <section class="construction-menu" data-build-menu="basic" hidden aria-label="Build menu">
         <div class="construction-menu__cards">
-          ${renderBuildMenuCards()}
+          ${renderBuildMenuCards(BASIC_BUILD_MENU_ENTRIES)}
+        </div>
+      </section>
+
+      <section class="construction-menu" data-build-menu="industry" hidden aria-label="Industry menu">
+        <div class="construction-menu__cards">
+          ${renderBuildMenuCards(INDUSTRY_BUILD_MENU_ENTRIES)}
         </div>
       </section>
 
@@ -241,13 +265,22 @@ export class BuildToolbar {
           </svg>
           <span class="construction-dock-button__hotkey" aria-hidden="true">R</span>
         </button>
-        <button type="button" class="construction-dock-button construction-dock-button--hotkey" data-action="build-menu" data-tooltip="Build (B)" aria-label="Build menu (B)" aria-expanded="false" aria-pressed="false">
+        <button type="button" class="construction-dock-button construction-dock-button--hotkey" data-action="basic-build-menu" data-tooltip="Build (B)" aria-label="Build menu (B)" aria-expanded="false" aria-pressed="false">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M14.5 5.5l4 4" />
             <path d="M12.3 7.7l4-4 3.9 3.9-4 4" />
             <path d="M14.8 10.8L6.4 19.2a2.1 2.1 0 0 1-3-3l8.4-8.4" />
           </svg>
           <span class="construction-dock-button__hotkey" aria-hidden="true">B</span>
+        </button>
+        <button type="button" class="construction-dock-button construction-dock-button--hotkey" data-action="industry-build-menu" data-tooltip="Industry (V)" aria-label="Industry menu (V)" aria-expanded="false" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 18h18" />
+            <path d="M7 18V11h10v7" />
+            <path d="M10 11V8h4v3" />
+            <path d="M12 6v2" />
+          </svg>
+          <span class="construction-dock-button__hotkey" aria-hidden="true">V</span>
         </button>
         <button type="button" class="construction-dock-button construction-dock-button--hotkey construction-dock-button--water" data-action="water-overlay" data-tooltip="Water map (M)" aria-label="Water map (M)" aria-pressed="false">
           <span class="construction-dock-button__icon" aria-hidden="true">💧</span>
@@ -322,12 +355,14 @@ export class BuildToolbar {
     this.unsubscribeTipsPreference = subscribeTipCardsPreference(() => this.syncContextPanels());
 
     this.roadButton = this.mustButton(root, '[data-action="road"]');
-    this.buildMenuButton = this.mustButton(root, '[data-action="build-menu"]');
+    this.basicBuildMenuButton = this.mustButton(root, '[data-action="basic-build-menu"]');
+    this.industryBuildMenuButton = this.mustButton(root, '[data-action="industry-build-menu"]');
     this.waterOverlayButton = this.mustButton(root, '[data-action="water-overlay"]');
     this.helpButton = this.mustButton(root, '[data-action="help"]');
     this.settingsButton = this.mustButton(root, '[data-action="settings"]');
     this.buildButton = this.mustButton(root, '[data-action="commit-build"]');
-    this.buildMenu = this.mustElement(root, '[data-build-menu]');
+    this.basicBuildMenu = this.mustElement(root, '[data-build-menu="basic"]');
+    this.industryBuildMenu = this.mustElement(root, '[data-build-menu="industry"]');
     this.burgageLayoutHud = this.mustElement(root, '[data-burgage-layout-hud]');
     this.burgagePlotDecreaseButton = this.mustButton(root, '[data-action="burgage-plot-decrease"]');
     this.burgagePlotIncreaseButton = this.mustButton(root, '[data-action="burgage-plot-increase"]');
@@ -348,11 +383,17 @@ export class BuildToolbar {
     this.compassHud = new CompassHud(root);
     this.helpButton.setAttribute('aria-pressed', String(!areTipCardsDisabled()));
 
-    this.buildMenuToggle = {
-      button: this.buildMenuButton,
+    this.basicBuildMenuToggle = {
+      button: this.basicBuildMenuButton,
       hotkey: 'b',
-      getActive: () => this.buildMenuOpen,
-      setActive: (active) => this.setBuildMenuOpen(active),
+      getActive: () => this.basicBuildMenuOpen,
+      setActive: (active) => this.setBasicBuildMenuOpen(active),
+    };
+    this.industryBuildMenuToggle = {
+      button: this.industryBuildMenuButton,
+      hotkey: 'v',
+      getActive: () => this.industryBuildMenuOpen,
+      setActive: (active) => this.setIndustryBuildMenuOpen(active),
     };
     this.waterOverlayToggle = {
       button: this.waterOverlayButton,
@@ -360,7 +401,7 @@ export class BuildToolbar {
       getActive: () => this.waterOverlayActive,
       setActive: (active) => this.applyWaterOverlay(active),
     };
-    this.dockToggles = [this.buildMenuToggle, this.waterOverlayToggle];
+    this.dockToggles = [this.basicBuildMenuToggle, this.industryBuildMenuToggle, this.waterOverlayToggle];
     this.waterOverlayActive = isHydrologyOverlayEnabled();
     for (const toggle of this.dockToggles) {
       syncDockToggleButton(toggle);
@@ -368,26 +409,20 @@ export class BuildToolbar {
 
     this.syncContextPanels();
     this.roadButton.addEventListener('click', () => {
-      this.setBuildMenuOpen(false);
+      this.closeAllBuildMenus();
       handlers.onOpenRoads();
     });
-    this.buildMenuButton.addEventListener('click', () => toggleDockControl(this.buildMenuToggle));
+    this.basicBuildMenuButton.addEventListener('click', () => toggleDockControl(this.basicBuildMenuToggle));
+    this.industryBuildMenuButton.addEventListener('click', () => toggleDockControl(this.industryBuildMenuToggle));
     this.waterOverlayButton.addEventListener('click', () => toggleDockControl(this.waterOverlayToggle));
     this.helpButton.addEventListener('click', () => this.toggleHelpTips());
     this.settingsButton.addEventListener('click', () => {
-      this.setBuildMenuOpen(false);
+      this.closeAllBuildMenus();
       this.gameMenu?.toggle();
     });
-    this.buildMenu.addEventListener('click', (event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
-      if (!button || !this.buildMenu.contains(button)) return;
-      const action = button.dataset.action as BuildMenuAction | undefined;
-      if (!action) return;
-      runBuildMenuAction(action, this.toolbarHandlers, () => this.setBuildMenuOpen(false));
-    });
+    this.bindBuildMenuClicks(this.basicBuildMenu, () => this.setBasicBuildMenuOpen(false));
+    this.bindBuildMenuClicks(this.industryBuildMenu, () => this.setIndustryBuildMenuOpen(false));
     this.buildButton.addEventListener('click', handlers.onBuildRoad);
-    this.buildMenu.addEventListener('mousedown', (event) => event.stopPropagation());
-    this.buildMenu.addEventListener('click', (event) => event.stopPropagation());
     this.burgagePlotDecreaseButton.addEventListener('click', () => handlers.onBurgagePlotDecrease?.());
     this.burgagePlotIncreaseButton.addEventListener('click', () => handlers.onBurgagePlotIncrease?.());
     this.burgageRotateFrontageButton.addEventListener('click', () => handlers.onBurgageRotateFrontage?.());
@@ -412,10 +447,11 @@ export class BuildToolbar {
     this.gameplayEnabled = enabled;
     this.constructionDock.classList.toggle('is-session-blocked', !enabled);
     this.roadButton.disabled = !enabled;
-    this.buildMenuButton.disabled = !enabled;
+    this.basicBuildMenuButton.disabled = !enabled;
+    this.industryBuildMenuButton.disabled = !enabled;
     this.waterOverlayButton.disabled = !enabled;
     if (!enabled) {
-      this.setBuildMenuOpen(false);
+      this.closeAllBuildMenus();
       dismissDockToggles(this.dockToggles);
       if (this.waterOverlayActive) {
         this.applyWaterOverlay(false);
@@ -440,7 +476,7 @@ export class BuildToolbar {
     const roadMode = stats.mode === 'road';
     this.roadButton.classList.toggle('is-active', roadMode);
     this.roadButton.setAttribute('aria-pressed', String(roadMode));
-    this.syncBuildMenuButton();
+    this.syncBuildMenuButtons();
     this.syncBuildMenuCardActiveState(stats.mode);
     this.buildButton.disabled = !stats.canBuild;
     this.buildButton.classList.toggle('is-ready', stats.canBuild);
@@ -596,28 +632,70 @@ export class BuildToolbar {
     if (runCancel) cancel?.();
   }
 
-  private setBuildMenuOpen(open: boolean): void {
-    if (this.buildMenuOpen === open) return;
-    this.buildMenuOpen = open;
-    this.buildMenu.hidden = !open;
-    this.buildMenuButton.setAttribute('aria-expanded', String(open));
-    this.syncBuildMenuButton();
+  private isAnyBuildMenuOpen(): boolean {
+    return this.basicBuildMenuOpen || this.industryBuildMenuOpen;
   }
 
-  private syncBuildMenuButton(): void {
-    const constructionMode = isConstructionToolMode(this.hudMode);
-    const active = constructionMode || this.buildMenuOpen;
-    this.buildMenuButton.classList.toggle('is-active', active);
-    this.buildMenuButton.setAttribute('aria-pressed', String(active));
+  private closeAllBuildMenus(): void {
+    this.setBasicBuildMenuOpen(false);
+    this.setIndustryBuildMenuOpen(false);
+  }
+
+  private setBasicBuildMenuOpen(open: boolean): void {
+    if (this.basicBuildMenuOpen === open) return;
+    if (open) this.setIndustryBuildMenuOpen(false);
+    this.basicBuildMenuOpen = open;
+    this.basicBuildMenu.hidden = !open;
+    this.basicBuildMenuButton.setAttribute('aria-expanded', String(open));
+    this.syncBuildMenuButtons();
+  }
+
+  private setIndustryBuildMenuOpen(open: boolean): void {
+    if (this.industryBuildMenuOpen === open) return;
+    if (open) this.setBasicBuildMenuOpen(false);
+    this.industryBuildMenuOpen = open;
+    this.industryBuildMenu.hidden = !open;
+    this.industryBuildMenuButton.setAttribute('aria-expanded', String(open));
+    this.syncBuildMenuButtons();
+  }
+
+  private syncBuildMenuButtons(): void {
+    const activeAction = toolbarModeToMenuAction(this.hudMode);
+    const basicConstruction = activeAction != null && BASIC_BUILD_MENU_ACTIONS.has(activeAction);
+    const industryConstruction = activeAction != null && INDUSTRY_BUILD_MENU_ACTIONS.has(activeAction);
+    const basicActive = basicConstruction || this.basicBuildMenuOpen;
+    const industryActive = industryConstruction || this.industryBuildMenuOpen;
+
+    this.basicBuildMenuButton.classList.toggle('is-active', basicActive);
+    this.basicBuildMenuButton.setAttribute('aria-pressed', String(basicActive));
+    this.industryBuildMenuButton.classList.toggle('is-active', industryActive);
+    this.industryBuildMenuButton.setAttribute('aria-pressed', String(industryActive));
   }
 
   private syncBuildMenuCardActiveState(mode: ToolbarStats['mode']): void {
     const activeAction = toolbarModeToMenuAction(mode);
-    for (const button of this.buildMenu.querySelectorAll<HTMLButtonElement>('.construction-card[data-action]')) {
+    this.syncBuildMenuCards(this.basicBuildMenu, activeAction);
+    this.syncBuildMenuCards(this.industryBuildMenu, activeAction);
+  }
+
+  private syncBuildMenuCards(menu: HTMLElement, activeAction: PlacementBuildMenuAction | null): void {
+    for (const button of menu.querySelectorAll<HTMLButtonElement>('.construction-card[data-action]')) {
       const isActive = button.dataset.action === activeAction;
       button.classList.toggle('is-active', isActive);
       button.setAttribute('aria-pressed', String(isActive));
     }
+  }
+
+  private bindBuildMenuClicks(menu: HTMLElement, closeMenu: () => void): void {
+    menu.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-action]');
+      if (!button || !menu.contains(button)) return;
+      const action = button.dataset.action as BuildMenuAction | undefined;
+      if (!action) return;
+      runBuildMenuAction(action, this.toolbarHandlers, closeMenu);
+    });
+    menu.addEventListener('mousedown', (event) => event.stopPropagation());
+    menu.addEventListener('click', (event) => event.stopPropagation());
   }
 
   private toggleHelpTips(): void {

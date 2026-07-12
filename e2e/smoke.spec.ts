@@ -11,7 +11,7 @@ test('connects, places a reforester, and updates settlement HUD timber', async (
   const timberHud = page.locator('[data-stockpile="timber"]');
   await expect(timberHud).toHaveText(String(STARTING_TIMBER), { timeout: STARTUP_TIMEOUT_MS });
 
-  await page.keyboard.press('b');
+  await page.keyboard.press('v');
   await page.keyboard.press('f');
   await page.waitForFunction(() => window.__medievalE2e?.getBuildingMode() === 'reforester');
 
