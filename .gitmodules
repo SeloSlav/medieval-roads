@@ -1,0 +1,3 @@
+[submodule "vendor/seedthree"]
+	path = vendor/seedthree
+	url = https://github.com/SkyeShark/SeedThree.git
