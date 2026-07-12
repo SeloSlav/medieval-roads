@@ -152,6 +152,15 @@ export class ForestManager {
       return;
     }
 
+    this.restoreTreePhaseVisual(layoutIndex, phase, growthProgress);
+    this.commitTreeInstanceUpdates();
+  }
+
+  private restoreTreePhaseVisual(
+    layoutIndex: number,
+    phase: TreePhase = this.treePhases.get(layoutIndex) ?? 'mature',
+    growthProgress: number = this.treeGrowthProgress.get(layoutIndex) ?? 1,
+  ): void {
     switch (phase) {
       case 'mature':
         this.hideHarvestStump(layoutIndex);
@@ -173,8 +182,6 @@ export class ForestManager {
         return unreachable;
       }
     }
-
-    this.commitTreeInstanceUpdates();
   }
 
   setTreeShadowsEnabled(enabled: boolean): void {
@@ -226,13 +233,24 @@ export class ForestManager {
 
     const treesChanged = !removedIndexSetsEqual(nextRemoved, this.removedTrees);
     if (treesChanged) {
+      const previousRemoved = this.removedTrees;
       this.removedTrees = nextRemoved;
 
       for (let treeIndex = 0; treeIndex < this.placements.length; treeIndex++) {
-        const phase = this.treePhases.get(treeIndex) ?? 'mature';
-        const growthProgress = this.treeGrowthProgress.get(treeIndex) ?? 1;
-        this.applyTreePhase(treeIndex, phase, growthProgress);
+        const wasRemoved = previousRemoved.has(treeIndex);
+        const isRemoved = nextRemoved.has(treeIndex);
+        if (wasRemoved === isRemoved) continue;
+
+        if (isRemoved) {
+          this.hideTree(treeIndex);
+          this.hideHarvestStump(treeIndex);
+          this.hideSapling(treeIndex);
+        } else {
+          this.restoreTreePhaseVisual(treeIndex);
+        }
       }
+
+      this.commitTreeInstanceUpdates();
     }
 
     this.syncUndergrowthClearance(edges, buildings, burgageParcelPolygons);
