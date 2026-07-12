@@ -60,9 +60,6 @@ const SLOT_CAPACITY = GRASS_TUFTS_PER_CHUNK + 8;
 const MAX_STREAM_INSTANCES = GRID_SIDE * GRID_SIDE * SLOT_CAPACITY;
 const MIN_TUFT_SPACING_SQ = 0.42 * 0.42;
 const MIN_MICRO_TUFT_SPACING_SQ = 0.26 * 0.26;
-/** SeedThree clumps are large — bake once in world space (no camera streaming). */
-const STATIC_SEEDTHREE_TUFT_TARGET = 12_000;
-const STATIC_SEEDTHREE_MAX_INSTANCES = 14_000;
 const hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 
 /** Muted olive — aligned with forest undergrowth. */
@@ -124,31 +121,56 @@ export async function createGrassBladeField(
     roadSpatialIndex: null,
   };
 
-  if (options?.useSeedThreeClumps === true) {
-    return createStaticSeedThreeGrassField(context, options.maxAnisotropy ?? 4);
-  }
-
+  const useSeedThreeClumps = options?.useSeedThreeClumps === true;
   let streamMeshes: GrassStreamMesh[];
   let material: THREE.Material;
   let disposeResources: () => void;
 
-  material = createGrassBladeMaterial();
-  const geometry = createGrassTuftGeometry();
-  const mesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
-  mesh.name = 'Grass blade stream';
-  mesh.count = 0;
-  mesh.castShadow = false;
-  mesh.receiveShadow = true;
-  mesh.frustumCulled = false;
-  mesh.visible = false;
-  streamMeshes = [{ mesh }];
-  disposeResources = () => {
-    geometry.dispose();
-    material.dispose();
-  };
+  if (useSeedThreeClumps) {
+    const textures = await loadSeedThreeGrassTextures(options?.maxAnisotropy ?? 4);
+    const variants = createSeedThreeTuftVariants();
+    material = createSeedThreeGrassMaterial(textures);
+    streamMeshes = variants.map((variant, index) => {
+      const geometry = variant.geometry;
+      const tintAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STREAM_INSTANCES * 3), 3);
+      const anchorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STREAM_INSTANCES * 3), 3);
+      const windVecAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STREAM_INSTANCES * 3), 3);
+      geometry.setAttribute('aTint', tintAttr);
+      geometry.setAttribute('aAnchorPos', anchorAttr);
+      geometry.setAttribute('aWindVec', windVecAttr);
+      const mesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
+      mesh.name = index === 0 ? 'SeedThree grass meadow' : 'SeedThree grass clump';
+      mesh.count = 0;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      return { mesh, variant, tintAttr, anchorAttr, windVecAttr };
+    });
+    disposeResources = () => {
+      for (const entry of streamMeshes) entry.mesh.geometry.dispose();
+      material.dispose();
+      disposeSeedThreeGrassTextureCache();
+    };
+  } else {
+    material = createGrassBladeMaterial();
+    const geometry = createGrassTuftGeometry();
+    const mesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
+    mesh.name = 'Grass blade stream';
+    mesh.count = 0;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    streamMeshes = [{ mesh }];
+    disposeResources = () => {
+      geometry.dispose();
+      material.dispose();
+    };
+  }
 
   const group = new THREE.Group();
-  group.name = 'Grass blade field';
+  group.name = useSeedThreeClumps ? 'SeedThree grass field' : 'Grass blade field';
   for (const entry of streamMeshes) group.add(entry.mesh);
 
   const slotRecords: SlotRecord[] = Array.from({ length: GRID_SIDE * GRID_SIDE }, () => ({
@@ -225,16 +247,25 @@ export async function createGrassBladeField(
       return;
     }
 
-    const meshCounts = [
-      writeChunkInstances(
-        streamMeshes[0]!.mesh,
-        slotStart,
-        worldChunkX,
-        worldChunkZ,
-        context,
-        SLOT_CAPACITY,
-      ) - slotStart,
-    ];
+    const meshCounts = useSeedThreeClumps
+      ? writeSeedThreeChunkInstances(
+          streamMeshes,
+          slotStart,
+          worldChunkX,
+          worldChunkZ,
+          context,
+          SLOT_CAPACITY,
+        )
+      : [
+          writeChunkInstances(
+            streamMeshes[0]!.mesh,
+            slotStart,
+            worldChunkX,
+            worldChunkZ,
+            context,
+            SLOT_CAPACITY,
+          ) - slotStart,
+        ];
     slotRecords[gridIdx] = { worldChunkX, worldChunkZ, meshCounts };
   };
 
@@ -406,137 +437,21 @@ const writeEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const writeColor = new THREE.Color();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
-async function createStaticSeedThreeGrassField(
-  context: GrassFieldContext,
-  maxAnisotropy: number,
-): Promise<GrassBladeField> {
-  const textures = await loadSeedThreeGrassTextures(maxAnisotropy);
-  const variants = createSeedThreeTuftVariants();
-  const material = createSeedThreeGrassMaterial(textures);
-  const streamMeshes: GrassStreamMesh[] = variants.map((variant, index) => {
-    const geometry = variant.geometry;
-    const tintAttr = new THREE.InstancedBufferAttribute(new Float32Array(STATIC_SEEDTHREE_MAX_INSTANCES * 3), 3);
-    const anchorAttr = new THREE.InstancedBufferAttribute(new Float32Array(STATIC_SEEDTHREE_MAX_INSTANCES * 3), 3);
-    const windVecAttr = new THREE.InstancedBufferAttribute(new Float32Array(STATIC_SEEDTHREE_MAX_INSTANCES * 3), 3);
-    geometry.setAttribute('aTint', tintAttr);
-    geometry.setAttribute('aAnchorPos', anchorAttr);
-    geometry.setAttribute('aWindVec', windVecAttr);
-    const mesh = new THREE.InstancedMesh(geometry, material, STATIC_SEEDTHREE_MAX_INSTANCES);
-    mesh.name = index === 0 ? 'SeedThree grass meadow' : 'SeedThree grass clump';
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.frustumCulled = false;
-    mesh.visible = false;
-    return { mesh, variant, tintAttr, anchorAttr, windVecAttr };
-  });
-
-  const meshWriteIndices = streamMeshes.map(() => 0);
-  const chunkMin = Math.floor(-context.extent / GRASS_BLADE_CHUNK_SIZE);
-  const chunkMax = Math.ceil(context.extent / GRASS_BLADE_CHUNK_SIZE);
-
-  for (let chunkZ = chunkMin; chunkZ < chunkMax; chunkZ++) {
-    for (let chunkX = chunkMin; chunkX < chunkMax; chunkX++) {
-      const totalPlaced = meshWriteIndices.reduce((sum, count) => sum + count, 0);
-      if (totalPlaced >= STATIC_SEEDTHREE_TUFT_TARGET) break;
-      scatterSeedThreeTuftsInChunk(streamMeshes, meshWriteIndices, chunkX, chunkZ, context);
-    }
-    if (meshWriteIndices.reduce((sum, count) => sum + count, 0) >= STATIC_SEEDTHREE_TUFT_TARGET) break;
-  }
-
-  for (let meshIndex = 0; meshIndex < streamMeshes.length; meshIndex++) {
-    const entry = streamMeshes[meshIndex]!;
-    entry.mesh.count = meshWriteIndices[meshIndex] ?? 0;
-    entry.mesh.instanceMatrix.needsUpdate = true;
-    entry.tintAttr!.needsUpdate = true;
-    entry.anchorAttr!.needsUpdate = true;
-    entry.windVecAttr!.needsUpdate = true;
-    entry.mesh.computeBoundingSphere();
-  }
-
-  const group = new THREE.Group();
-  group.name = 'SeedThree grass field';
-  for (const entry of streamMeshes) group.add(entry.mesh);
-
-  let lastMaterialOpacity = Number.NaN;
-  let grassZoomVisible = false;
-
-  const rebuild = (): void => {
-    for (const entry of streamMeshes) {
-      for (let index = 0; index < STATIC_SEEDTHREE_MAX_INSTANCES; index++) {
-        entry.mesh.setMatrixAt(index, hiddenMatrix);
-      }
-    }
-    meshWriteIndices.fill(0);
-    for (let chunkZ = chunkMin; chunkZ < chunkMax; chunkZ++) {
-      for (let chunkX = chunkMin; chunkX < chunkMax; chunkX++) {
-        const totalPlaced = meshWriteIndices.reduce((sum, count) => sum + count, 0);
-        if (totalPlaced >= STATIC_SEEDTHREE_TUFT_TARGET) break;
-        scatterSeedThreeTuftsInChunk(streamMeshes, meshWriteIndices, chunkX, chunkZ, context);
-      }
-      if (meshWriteIndices.reduce((sum, count) => sum + count, 0) >= STATIC_SEEDTHREE_TUFT_TARGET) break;
-    }
-    for (let meshIndex = 0; meshIndex < streamMeshes.length; meshIndex++) {
-      const entry = streamMeshes[meshIndex]!;
-      entry.mesh.count = meshWriteIndices[meshIndex] ?? 0;
-      entry.mesh.instanceMatrix.needsUpdate = true;
-      entry.tintAttr!.needsUpdate = true;
-      entry.anchorAttr!.needsUpdate = true;
-      entry.windVecAttr!.needsUpdate = true;
-      entry.mesh.computeBoundingSphere();
-    }
-  };
-
-  return {
-    group,
-    syncRoadClearance(network: RoadNetwork) {
-      context.roadSpatialIndex = RoadSpatialIndex.fromNetwork(network);
-      rebuild();
-    },
-    setBuildInteractionActive() {},
-    setRoadDraftActive() {},
-    updateCameraState(
-      _cameraPosition: THREE.Vector3,
-      _cameraTarget: THREE.Vector3,
-      cameraDistance: number,
-      firstPersonActive = false,
-    ) {
-      const { grassOpacity } = resolveCloseGroundLod(cameraDistance, firstPersonActive);
-      grassZoomVisible = grassOpacity > 0.02;
-
-      if (!Number.isFinite(lastMaterialOpacity) || Math.abs(grassOpacity - lastMaterialOpacity) > 0.008) {
-        lastMaterialOpacity = grassOpacity;
-        material.opacity = grassOpacity;
-        const useTransparency = grassOpacity < 0.995;
-        if (material.transparent !== useTransparency) {
-          material.transparent = useTransparency;
-          material.depthWrite = !useTransparency;
-          material.needsUpdate = true;
-        }
-      }
-
-      for (const entry of streamMeshes) entry.mesh.visible = grassZoomVisible;
-    },
-    dispose() {
-      for (const entry of streamMeshes) entry.mesh.geometry.dispose();
-      material.dispose();
-      disposeSeedThreeGrassTextureCache();
-    },
-  };
-}
-
-function scatterSeedThreeTuftsInChunk(
+function writeSeedThreeChunkInstances(
   streamMeshes: GrassStreamMesh[],
-  meshWriteIndices: number[],
+  startIndex: number,
   chunkX: number,
   chunkZ: number,
   context: GrassFieldContext,
-): void {
+  maxInstancesPerMesh = Number.POSITIVE_INFINITY,
+): number[] {
   const { terrain, extent, terrainExtent, forestCores, isBlockedAt, roadSpatialIndex } = context;
   const rng = mulberry32(chunkSeed(chunkX, chunkZ));
   const chunkMinX = chunkX * GRASS_BLADE_CHUNK_SIZE;
   const chunkMinZ = chunkZ * GRASS_BLADE_CHUNK_SIZE;
   const chunkSpan = GRASS_BLADE_CHUNK_SIZE;
   const margin = chunkSpan * 0.06;
+  const meshWriteIndices = streamMeshes.map(() => startIndex);
   const heightCache = new Map<number, number>();
 
   const heightAt = (x: number, z: number): number => {
@@ -549,12 +464,10 @@ function scatterSeedThreeTuftsInChunk(
   };
 
   const localPlacements: { x: number; z: number }[] = [];
-  const tuftTarget = Math.max(4, Math.floor((GRASS_TUFTS_PER_CHUNK + Math.floor(rng() * 9)) * 0.62));
+  const tuftTarget = GRASS_TUFTS_PER_CHUNK + Math.floor(rng() * 9);
 
   for (let attempt = 0; attempt < GRASS_TUFT_SCATTER_ATTEMPTS && localPlacements.length < tuftTarget; attempt++) {
-    const totalPlaced = meshWriteIndices.reduce((sum, count) => sum + count, 0);
-    if (totalPlaced >= STATIC_SEEDTHREE_TUFT_TARGET) break;
-    if (streamMeshes.every((_, meshIndex) => meshWriteIndices[meshIndex]! >= STATIC_SEEDTHREE_MAX_INSTANCES)) break;
+    if (streamMeshes.every((_, meshIndex) => meshWriteIndices[meshIndex]! - startIndex >= maxInstancesPerMesh)) break;
 
     let x: number;
     let z: number;
@@ -586,7 +499,7 @@ function scatterSeedThreeTuftsInChunk(
 
     const variantIndex = rng() < (streamMeshes[0]?.variant?.share ?? 0.62) ? 0 : 1;
     const entry = streamMeshes[variantIndex];
-    if (!entry?.variant || meshWriteIndices[variantIndex]! >= STATIC_SEEDTHREE_MAX_INSTANCES) continue;
+    if (!entry?.variant || meshWriteIndices[variantIndex]! - startIndex >= maxInstancesPerMesh) continue;
 
     localPlacements.push({ x, z });
 
@@ -605,10 +518,23 @@ function scatterSeedThreeTuftsInChunk(
     const tint = sampleSeedThreeGrassTint(rng, dry);
     entry.tintAttr?.setXYZ(instanceIndex, tint.x, tint.y, tint.z);
     entry.anchorAttr?.setXYZ(instanceIndex, x, rootY, z);
-    const windVec = seedThreeGrassWindVecForYaw(yaw);
+    const windVec = seedThreeGrassWindVecForYaw(yaw, writeScale);
     entry.windVecAttr?.setXYZ(instanceIndex, windVec.x, windVec.y, windVec.z);
     meshWriteIndices[variantIndex] = instanceIndex + 1;
   }
+
+  for (let meshIndex = 0; meshIndex < streamMeshes.length; meshIndex++) {
+    const entry = streamMeshes[meshIndex]!;
+    for (
+      let pad = meshWriteIndices[meshIndex]!;
+      pad < startIndex + maxInstancesPerMesh && Number.isFinite(maxInstancesPerMesh);
+      pad++
+    ) {
+      entry.mesh.setMatrixAt(pad, hiddenMatrix);
+    }
+  }
+
+  return meshWriteIndices.map((index) => index - startIndex);
 }
 
 function composeSeedThreeTuftMatrix(
