@@ -172,9 +172,9 @@ export async function createUndergrowthMaterials(
   const textures = collectTextures(bushTextures, fernTextures, juniperTextures);
 
   return {
-    bush: createUndergrowthCardMaterial('SeedThree bilberry undergrowth', bushTextures, useNodeMaterials, [0.42, 0.6, 0.22]),
-    fern: createUndergrowthCardMaterial('SeedThree fern undergrowth', fernTextures, useNodeMaterials, [0.36, 0.68, 0.25]),
-    juniper: createUndergrowthCardMaterial('SeedThree juniper undergrowth', juniperTextures, useNodeMaterials, [0.3, 0.48, 0.2]),
+    bush: createUndergrowthCardMaterial('SeedThree bilberry undergrowth', bushTextures, useNodeMaterials, [0.3, 0.44, 0.16]),
+    fern: createUndergrowthCardMaterial('SeedThree fern undergrowth', fernTextures, useNodeMaterials, [0.26, 0.5, 0.18]),
+    juniper: createUndergrowthCardMaterial('SeedThree juniper undergrowth', juniperTextures, useNodeMaterials, [0.22, 0.36, 0.14]),
     shadowCast: new THREE.MeshStandardMaterial({
       transparent: true,
       opacity: 0,
@@ -209,7 +209,7 @@ export function createUndergrowthPlacements(
     if (Math.hypot(x, z) < CENTRAL_CLEARING_RADIUS + rng() * 12) continue;
 
     const density = forestDensityAt(x, z, forestCores, spawnConfig.extent, spawnConfig.terrainExtent);
-    if (density < 0.22 || rng() > density * 1.08) continue;
+    if (density < 0.18 || rng() > density * 1.12) continue;
 
     const kind = pickUndergrowthKind(rng, density);
     const minDistance =
@@ -317,6 +317,8 @@ function createUndergrowthBucket(
   mesh.count = placements.length;
   mesh.castShadow = false;
   mesh.receiveShadow = true;
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
 
   const shadowMesh = createShadowInstancedMesh(
     createUndergrowthShadowGeometry(kind),
@@ -394,7 +396,7 @@ function composeUndergrowthMatrix(
   position: THREE.Vector3,
   scaleVector: THREE.Vector3,
 ): number {
-  const y = terrain.getHeightAt(placement.x, placement.z) - 0.025;
+  const y = terrain.getHeightAt(placement.x, placement.z) + 0.05;
   const yaw = placement.yaw + (rng() - 0.5) * 0.24;
   const leanDirection = rng() * TAU;
   const lean = placement.kind === 'fern'
@@ -427,7 +429,7 @@ function pickUndergrowthKind(rng: () => number, density: number): UndergrowthKin
 }
 
 function sampleUndergrowthScale(kind: UndergrowthKind, density: number, rng: () => number): number {
-  const densityMul = THREE.MathUtils.lerp(0.92, 1.08, density);
+  const densityMul = THREE.MathUtils.lerp(0.98, 1.14, density) * 1.16;
   switch (kind) {
     case 'bush':
       return THREE.MathUtils.lerp(0.52, 0.92, Math.pow(rng(), 0.78)) * densityMul;
@@ -446,21 +448,21 @@ function sampleUndergrowthTint(kind: UndergrowthKind, rng: () => number): THREE.
   switch (kind) {
     case 'bush':
       return new THREE.Vector3(
-        rngRange(rng, 0.72, 0.94),
-        rngRange(rng, 0.82, 1.08),
-        rngRange(rng, 0.72, 0.96),
+        rngRange(rng, 0.58, 0.76),
+        rngRange(rng, 0.64, 0.84),
+        rngRange(rng, 0.56, 0.74),
       );
     case 'fern':
       return new THREE.Vector3(
-        rngRange(rng, 0.72, 0.92),
-        rngRange(rng, 0.92, 1.18),
-        rngRange(rng, 0.66, 0.9),
+        rngRange(rng, 0.58, 0.74),
+        rngRange(rng, 0.7, 0.88),
+        rngRange(rng, 0.52, 0.72),
       );
     case 'juniper':
       return new THREE.Vector3(
-        rngRange(rng, 0.68, 0.9),
-        rngRange(rng, 0.78, 1.0),
-        rngRange(rng, 0.78, 1.06),
+        rngRange(rng, 0.54, 0.72),
+        rngRange(rng, 0.62, 0.8),
+        rngRange(rng, 0.62, 0.82),
       );
     default: {
       const exhaustive: never = kind;
@@ -508,17 +510,20 @@ function createUndergrowthCardMaterial(
   const transmit = tsl.uniform(new THREE.Color().setRGB(...transmitRGB));
   const edge = textures.translucency ? tsl.texture(textures.translucency).r : tsl.float(1);
   material.thicknessColorNode = edge.mul(tsl.attribute('aTint', 'vec3').y).mul(transmit);
-  material.thicknessDistortionNode = tsl.uniform(0.35);
-  material.thicknessAmbientNode = tsl.uniform(0.05);
+  material.thicknessDistortionNode = tsl.uniform(0.3);
+  material.thicknessAmbientNode = tsl.uniform(0.026);
   material.thicknessAttenuationNode = tsl.uniform(1.0);
   material.thicknessPowerNode = tsl.uniform(5.0);
-  material.thicknessScaleNode = tsl.uniform(2.25);
-  material.colorNode = tsl.texture(textures.albedo).mul(tsl.vec4(tsl.attribute('aTint', 'vec3'), tsl.float(1)));
-  material.positionNode = createRootedFoliageWindPosition(1, 0.18);
+  material.thicknessScaleNode = tsl.uniform(1.5);
+  const tone = tsl.uniform(new THREE.Vector3(0.72, 0.76, 0.64));
+  material.colorNode = tsl
+    .texture(textures.albedo)
+    .mul(tsl.vec4(tsl.attribute('aTint', 'vec3').mul(tone), tsl.float(1)));
+  material.positionNode = createRootedFoliageWindPosition(0.16);
 
   const upView = tsl.cameraViewMatrix.mul(tsl.vec4(0, 1, 0, 0)).xyz;
   const relief = textures.normal ? tsl.normalMap(tsl.texture(textures.normal)).sub(tsl.normalView) : null;
-  material.normalNode = relief ? tsl.normalize(upView.add(relief.mul(0.52))) : tsl.normalize(upView);
+  material.normalNode = relief ? tsl.normalize(upView.add(relief.mul(0.4))) : tsl.normalize(upView);
   return material;
 }
 

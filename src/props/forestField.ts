@@ -32,7 +32,7 @@ const LEGACY_TERRAIN_SIZE = 1080;
 const BASE_TREE_COUNT = 360;
 const BASE_HILL_EDGE_TREE_COUNT = 820;
 const BASE_ROCK_COUNT = 86;
-const BASE_UNDERGROWTH_COUNT = 720;
+const BASE_UNDERGROWTH_COUNT = 880;
 const BASE_SAPLING_COUNT = 148;
 
 export function createForestSpawnConfig(

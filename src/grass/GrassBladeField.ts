@@ -92,6 +92,7 @@ type GrassStreamMesh = {
   mesh: THREE.InstancedMesh;
   variant?: SeedThreeTuftVariant;
   tintAttr?: THREE.InstancedBufferAttribute;
+  anchorAttr?: THREE.InstancedBufferAttribute;
 };
 
 export type GrassBladeFieldOptions = {
@@ -130,15 +131,18 @@ export async function createGrassBladeField(
     streamMeshes = variants.map((variant, index) => {
       const geometry = variant.geometry;
       const tintAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STREAM_INSTANCES * 3), 3);
+      const anchorAttr = new THREE.InstancedBufferAttribute(new Float32Array(MAX_STREAM_INSTANCES * 3), 3);
       geometry.setAttribute('aTint', tintAttr);
+      geometry.setAttribute('aAnchorPos', anchorAttr);
       const mesh = new THREE.InstancedMesh(geometry, material, MAX_STREAM_INSTANCES);
       mesh.name = index === 0 ? 'SeedThree grass meadow' : 'SeedThree grass clump';
       mesh.count = 0;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
+      mesh.renderOrder = 0;
       mesh.visible = false;
-      return { mesh, variant, tintAttr };
+      return { mesh, variant, tintAttr, anchorAttr };
     });
     disposeResources = () => {
       for (const entry of streamMeshes) entry.mesh.geometry.dispose();
@@ -306,6 +310,7 @@ export async function createGrassBladeField(
       entry.mesh.instanceMatrix.needsUpdate = true;
       if (entry.mesh.instanceColor) entry.mesh.instanceColor.needsUpdate = true;
       if (entry.tintAttr) entry.tintAttr.needsUpdate = true;
+      if (entry.anchorAttr) entry.anchorAttr.needsUpdate = true;
     }
     boundingSphereFrame++;
     const sphereInterval = buildInteractionActive ? 4 : 1;
@@ -494,8 +499,15 @@ function writeSeedThreeChunkInstances(
     localPlacements.push({ x, z, micro });
 
     const density = forestDensityAt(x, z, forestCores, extent, terrainExtent);
+    if (density > 0.48 && rng() > 0.4) return false;
+    if (density > 0.3 && rng() > 0.66) return false;
+    if (density > 0.22 && micro && rng() > 0.52) return false;
+
     const dry = Math.min(1, Math.max(0, (1 - density - 0.15) * 1.2)) + (rng() < 0.1 ? 0.3 : 0);
-    const heightMul = micro ? THREE.MathUtils.lerp(0.42, 0.72, rng()) : THREE.MathUtils.lerp(0.55, 1.15, rng());
+    const forestHeightMul = density > 0.35 ? THREE.MathUtils.lerp(0.72, 0.92, density) : 1;
+    const heightMul =
+      (micro ? THREE.MathUtils.lerp(0.42, 0.72, rng()) : THREE.MathUtils.lerp(0.55, 1.15, rng())) *
+      forestHeightMul;
     const height =
       heightMul *
       THREE.MathUtils.lerp(0.9, 1.06, density) *
@@ -508,6 +520,7 @@ function writeSeedThreeChunkInstances(
     entry.mesh.setMatrixAt(instanceIndex, writeMatrix);
     const tint = sampleSeedThreeGrassTint(rng, dry);
     entry.tintAttr?.setXYZ(instanceIndex, tint.x, tint.y, tint.z);
+    entry.anchorAttr?.setXYZ(instanceIndex, x, rootY, z);
     meshWriteIndices[variantIndex] = instanceIndex + 1;
     return true;
   };

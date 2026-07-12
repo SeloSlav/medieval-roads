@@ -4,6 +4,7 @@ import {
   positionGeometry,
   sin,
   time,
+  uv,
   vec3,
 } from 'three/tsl';
 import { windSpeed, windStrength } from '@seedthree/core/wind.js';
@@ -11,7 +12,6 @@ import { windSpeed, windStrength } from '@seedthree/core/wind.js';
 type TslNode = {
   mul: (value: unknown) => TslNode;
   add: (value: unknown) => TslNode;
-  div: (value: unknown) => TslNode;
   x: TslNode;
   y: TslNode;
   z: TslNode;
@@ -23,6 +23,7 @@ const tsl = {
   positionGeometry: positionGeometry as TslNode,
   sin: sin as (value: unknown) => TslNode,
   time: time as TslNode,
+  uv: uv as () => TslNode,
   vec3: vec3 as (x: unknown, y: unknown, z: unknown) => TslNode,
   windSpeed: windSpeed as unknown as TslNode,
   windStrength: windStrength as unknown as TslNode,
@@ -36,11 +37,10 @@ function swayAt(phaseWorld: TslNode, phaseScale: number): TslNode {
     .add(tsl.sin(t.mul(2.63).add(phase.mul(1.9))).mul(0.28));
 }
 
-/** Card foliage: rooted base (y fixed), xz bend weighted by geometry height squared. */
-export function createRootedFoliageWindPosition(bladeHeight = 1, ampScale = 0.18): TslNode {
+/** Card foliage: uv.y pins the root, xz bend only, per-instance wind phase. */
+export function createRootedFoliageWindPosition(ampScale = 0.16): TslNode {
   const geo = tsl.positionGeometry;
-  const heightNorm = geo.y.div(tsl.float(bladeHeight));
-  const k = heightNorm.mul(heightNorm);
+  const k = tsl.uv().y.mul(tsl.uv().y);
   const amp = tsl.windStrength.mul(ampScale);
   const anchorWorld = tsl.attribute('aAnchorPos', 'vec3');
   const gust = swayAt(anchorWorld, 2).mul(amp);
@@ -49,7 +49,7 @@ export function createRootedFoliageWindPosition(bladeHeight = 1, ampScale = 0.18
     .mul(3)
     .add(anchorWorld.z.mul(1.7))
     .add(anchorWorld.x.mul(1.3));
-  const jitter = tsl.sin(jitterT).mul(amp).mul(0.2);
+  const jitter = tsl.sin(jitterT).mul(amp).mul(0.18);
   const bend = gust.add(jitter).mul(k);
   const windLocal = tsl.attribute('aWindVec', 'vec3');
   return tsl.vec3(
