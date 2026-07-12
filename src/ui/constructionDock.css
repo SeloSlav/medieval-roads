@@ -14,6 +14,11 @@
   backdrop-filter: blur(12px);
 }
 
+.construction-dock[hidden],
+[data-ui-root].is-first-person .construction-dock {
+  display: none;
+}
+
 .construction-dock {
   position: absolute;
   left: 50%;
@@ -123,7 +128,8 @@
   pointer-events: none;
 }
 
-.construction-menu[hidden] {
+.construction-menu[hidden],
+[data-ui-root].is-first-person .construction-menu {
   display: none;
 }
 

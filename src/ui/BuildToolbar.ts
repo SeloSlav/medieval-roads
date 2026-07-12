@@ -493,13 +493,13 @@ export class BuildToolbar {
     }
     const statusText = describeToolbarStatus(stats);
     this.builderStatusBar.textContent = statusText;
-    this.builderStatusBar.hidden = !isBuilderHudMode(stats.mode);
+    this.builderStatusBar.hidden = this.firstPersonActive || !isBuilderHudMode(stats.mode);
     this.builderStatusBar.dataset.state = this.statusLabel.dataset.state;
     this.syncContextPanels();
   }
 
   setBuildButtonPosition(position: { clientX: number; clientY: number } | null, visible: boolean): void {
-    if (!visible || !position) {
+    if (this.firstPersonActive || !visible || !position) {
       if (!this.buildButtonVisible) return;
       this.buildButton.hidden = true;
       this.buildButtonVisible = false;
@@ -585,11 +585,21 @@ export class BuildToolbar {
   }
 
   setFirstPersonMode(active: boolean): void {
+    if (this.firstPersonActive === active) return;
     this.firstPersonActive = active;
+    this.root.classList.toggle('is-first-person', active);
     this.fpModePanel.classList.toggle('is-active', active);
     this.constructionDock.hidden = active;
     this.zoomStat.hidden = active;
     this.compassHud.setVisible(active);
+    if (active) {
+      this.closeAllBuildMenus();
+      dismissDockToggles(this.dockToggles);
+      this.setBuildButtonPosition(null, false);
+      this.setBurgageLayoutHud(null, null);
+      this.hideDeletePopup(false);
+      this.builderStatusBar.hidden = true;
+    }
     this.syncContextPanels();
   }
 

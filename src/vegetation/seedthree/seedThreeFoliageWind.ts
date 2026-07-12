@@ -1,7 +1,7 @@
 import {
   attribute,
   float,
-  positionGeometry,
+  positionLocal,
   sin,
   time,
   uv,
@@ -20,7 +20,7 @@ type TslNode = {
 const tsl = {
   attribute: attribute as (name: string, type: string) => TslNode,
   float: float as (value: number) => TslNode,
-  positionGeometry: positionGeometry as TslNode,
+  positionLocal: positionLocal as TslNode,
   sin: sin as (value: unknown) => TslNode,
   time: time as TslNode,
   uv: uv as () => TslNode,
@@ -37,9 +37,12 @@ function swayAt(phaseWorld: TslNode, phaseScale: number): TslNode {
     .add(tsl.sin(t.mul(2.63).add(phase.mul(1.9))).mul(0.28));
 }
 
-/** Card foliage: uv.y pins the root, xz bend only, per-instance wind phase. */
+/**
+ * Card foliage wind. Must bend from positionLocal (post-instance-matrix), not
+ * positionGeometry — a custom positionNode replaces positionLocal after instancing.
+ */
 export function createRootedFoliageWindPosition(ampScale = 0.16): TslNode {
-  const geo = tsl.positionGeometry;
+  const local = tsl.positionLocal;
   const k = tsl.uv().y.mul(tsl.uv().y);
   const amp = tsl.windStrength.mul(ampScale);
   const anchorWorld = tsl.attribute('aAnchorPos', 'vec3');
@@ -53,8 +56,8 @@ export function createRootedFoliageWindPosition(ampScale = 0.16): TslNode {
   const bend = gust.add(jitter).mul(k);
   const windLocal = tsl.attribute('aWindVec', 'vec3');
   return tsl.vec3(
-    geo.x.add(windLocal.x.mul(bend)),
-    geo.y,
-    geo.z.add(windLocal.z.mul(bend)),
+    local.x.add(windLocal.x.mul(bend)),
+    local.y,
+    local.z.add(windLocal.z.mul(bend)),
   );
 }

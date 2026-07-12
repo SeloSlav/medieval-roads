@@ -7,7 +7,7 @@ import {
   normalMap,
   normalView,
   normalize,
-  positionGeometry,
+  positionLocal,
   sin,
   texture,
   time,
@@ -38,7 +38,7 @@ const tsl = {
   normalMap: normalMap as (sample: unknown) => TslNode,
   normalView: normalView as TslNode,
   normalize: normalize as (value: unknown) => TslNode,
-  positionGeometry: positionGeometry as TslNode,
+  positionLocal: positionLocal as TslNode,
   sin: sin as (value: unknown) => TslNode,
   texture: texture as (map: THREE.Texture) => TslNode,
   time: time as TslNode,
@@ -63,14 +63,11 @@ function swayAt(phaseWorld: TslNode, phaseScale: number): TslNode {
 
 /**
  * Rooted grass sway for instanced tufts.
- * - uv.y weights bend (0 at card root, 1 at tip) — never shifts the planted base.
- * - aAnchorPos gives each tuft its own wind phase (positionWorld is shared on instances).
- * - Y is never modified; only xz shear from world wind heading.
+ * Must bend from positionLocal (post-instance-matrix), not positionGeometry.
  */
 function createPinnedGrassWindPosition(): TslNode {
-  const geo = tsl.positionGeometry;
-  const stemT = tsl.uv().y;
-  const k = stemT.mul(stemT);
+  const local = tsl.positionLocal;
+  const k = tsl.uv().y.mul(tsl.uv().y);
   const amp = tsl.windStrength.mul(0.16);
   const anchorWorld = tsl.attribute('aAnchorPos', 'vec3');
   const gust = swayAt(anchorWorld, 2.2).mul(amp);
@@ -82,9 +79,9 @@ function createPinnedGrassWindPosition(): TslNode {
   const jitter = tsl.sin(jitterT).mul(amp).mul(0.18);
   const bend = gust.add(jitter).mul(k);
   return tsl.vec3(
-    geo.x.add(grassWindDir.x.mul(bend)),
-    geo.y,
-    geo.z.add(grassWindDir.z.mul(bend)),
+    local.x.add(grassWindDir.x.mul(bend)),
+    local.y,
+    local.z.add(grassWindDir.z.mul(bend)),
   );
 }
 
@@ -123,14 +120,16 @@ async function loadOptional(url: string | undefined, srgb: boolean): Promise<THR
 export async function loadSeedThreeGrassTextures(maxAnisotropy: number): Promise<SeedThreeGrassTextures> {
   if (textureCache) return textureCache;
 
-  const [tuft, tuftNormal, tuftRoughness] = await Promise.all([
+  const [tuftLoaded, tuftNormal, tuftRoughness] = await Promise.all([
     loadTex(seedThreeLeafUrl('grass_tuft.png'), true),
     loadOptional(seedThreeLeafUrl('grass_tuft_normal.png'), false),
     loadOptional(seedThreeLeafUrl('grass_tuft_roughness.png'), false),
   ]);
 
+  let tuft = tuftLoaded;
   if (!tuft) {
-    throw new Error('SeedThree grass tuft texture missing (grass_tuft.png)');
+    console.warn('SeedThree grass tuft texture missing (grass_tuft.png) — using procedural fallback.');
+    tuft = createProceduralGrassTuftTexture();
   }
 
   for (const tex of [tuft, tuftNormal, tuftRoughness]) {
@@ -139,6 +138,41 @@ export async function loadSeedThreeGrassTextures(maxAnisotropy: number): Promise
 
   textureCache = { tuft, tuftNormal, tuftRoughness };
   return textureCache;
+}
+
+function createProceduralGrassTuftTexture(): THREE.Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    const fallback = new THREE.DataTexture(new Uint8Array([60, 110, 40, 255]), 1, 1, THREE.RGBAFormat);
+    fallback.needsUpdate = true;
+    fallback.colorSpace = THREE.SRGBColorSpace;
+    return fallback;
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+  gradient.addColorStop(0, 'rgba(34, 58, 24, 0)');
+  gradient.addColorStop(0.18, 'rgba(42, 72, 30, 0.92)');
+  gradient.addColorStop(0.72, 'rgba(58, 96, 42, 0.98)');
+  gradient.addColorStop(1, 'rgba(74, 112, 52, 0.88)');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.moveTo(32, 118);
+  ctx.bezierCurveTo(18, 92, 14, 58, 22, 24);
+  ctx.bezierCurveTo(28, 8, 36, 2, 32, 0);
+  ctx.bezierCurveTo(38, 2, 46, 8, 42, 24);
+  ctx.bezierCurveTo(50, 58, 46, 92, 32, 118);
+  ctx.closePath();
+  ctx.fill();
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 function tuftGeometry(planes: number, width: number): THREE.BufferGeometry {

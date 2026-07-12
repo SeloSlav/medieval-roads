@@ -196,6 +196,7 @@ export async function createGrassBladeField(
   let grassZoomVisible = false;
   let wasFirstPerson = false;
   let wasGrassVisible = false;
+  let streamBurstPending = false;
 
   const chunkInStreamRange = (chunkX: number, chunkZ: number, focusX: number, focusZ: number): boolean => {
     const chunkCenterX = (chunkX + 0.5) * GRASS_BLADE_CHUNK_SIZE;
@@ -296,6 +297,7 @@ export async function createGrassBladeField(
     anchorFocusZ = focusZ;
     needsFullStream = false;
     roadClearanceDirty = false;
+    streamBurstPending = true;
   };
 
   let buildInteractionActive = false;
@@ -307,13 +309,18 @@ export async function createGrassBladeField(
 
     const slotBudget = buildInteractionActive
       ? Math.max(2, Math.floor(GRASS_STREAM_SLOTS_PER_FRAME * 0.4))
-      : GRASS_STREAM_SLOTS_PER_FRAME;
+      : streamBurstPending
+        ? pendingSlots.length
+        : GRASS_STREAM_SLOTS_PER_FRAME;
     const end = Math.min(slotBudget, pendingSlots.length);
     for (let index = 0; index < end; index++) {
       const slot = pendingSlots[index]!;
       regenerateSlot(slot.gridIndex, slot.worldChunkX, slot.worldChunkZ, focusX, focusZ);
     }
     pendingSlots.splice(0, end);
+    if (streamBurstPending && pendingSlots.length === 0) {
+      streamBurstPending = false;
+    }
     refreshMeshCount();
     for (const entry of streamMeshes) {
       entry.mesh.instanceMatrix.needsUpdate = true;
@@ -384,10 +391,12 @@ export async function createGrassBladeField(
       if (!grassZoomVisible) {
         pendingSlots = [];
         wasGrassVisible = false;
+        streamBurstPending = false;
         return;
       }
       if (!wasGrassVisible) {
         needsFullStream = true;
+        streamBurstPending = true;
       }
       wasGrassVisible = true;
 
