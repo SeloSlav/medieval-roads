@@ -67,7 +67,7 @@ export class LoadingScreen {
   }
 
   dismiss(): void {
-    if (this.dismissed) return;
+    if (this.dismissed || this.retryHandler !== null) return;
     this.dismissed = true;
     this.root.classList.add('is-dismissed');
     window.setTimeout(() => {

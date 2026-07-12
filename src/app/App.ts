@@ -230,13 +230,18 @@ export class App {
     window.setTimeout(() => {
       void (async () => {
         try {
-          session.loadingScreen?.setProgress({ label: 'Growing forest…', detail: 'Building procedural trees' });
+          session.loadingScreen?.setProgress({ label: 'Growing forest…', detail: 'Building trees and ground cover' });
           await session.sceneManager.finishVegetation();
           if (this.roadNetwork) session.sceneManager.syncRoadNetwork(this.roadNetwork);
           this.onForestReady();
+          // Prime a frame so WebGPU tree materials compile before the overlay clears.
+          session.sceneManager.render(0, session.cameraController.getOrbitDistance());
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          this.sessionLifecycle?.onPresentationReady();
         } catch (error) {
           console.error('Vegetation build failed:', error);
           this.toastManager?.show('Forest vegetation failed to load. Try refreshing the page.', { variant: 'error' });
+          this.sessionLifecycle?.onPresentationReady();
         }
       })();
     }, 0);

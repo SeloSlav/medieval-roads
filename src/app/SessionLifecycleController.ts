@@ -45,11 +45,19 @@ export class SessionLifecycleController {
 
   onReady(): void {
     this.deps.sessionGate.markReady();
-    this.deps.loadingScreen?.dismiss();
+    // Overlay stays until App finishes finishVegetation() and calls onPresentationReady().
+    this.deps.loadingScreen?.setProgress({
+      label: 'Growing forest…',
+      detail: 'Building trees and ground cover',
+    });
     this.deps.connectionOverlay.hide();
     this.deps.toolbar?.setGameplayEnabled(true);
     this.clearReconnectTimer();
     this.clearDisconnectOverlayTimer();
+  }
+
+  onPresentationReady(): void {
+    this.deps.loadingScreen?.dismiss();
   }
 
   onBootstrapFailed(error: unknown, retry: () => void): void {
