@@ -41,12 +41,14 @@ pub fn step_residence(
         return;
     };
 
+    let sabbath_observance =
+        crate::simulation::labor_schedule::owner_sabbath_observance_enabled(ctx, residence.owner);
     step_residence_settlement(
         ctx,
         residence,
         has_chapel_access,
         has_monastery_coverage,
-        crate::simulation::labor_schedule::owner_sabbath_observance_enabled(ctx, residence.owner),
+        sabbath_observance,
     );
 
     let Some(residence) = ctx.db.residence().id().find(&residence_id) else {
