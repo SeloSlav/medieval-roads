@@ -27,6 +27,7 @@
     "test:settlement-schedule": "npx tsx scripts/testSettlementSchedule.mts",
     "test:world-config": "npx tsx scripts/testWorldConfigAuthority.mts",
     "test:connection-recovery": "npx tsx scripts/testConnectionRecoveryHints.mts",
+    "test:building-processor-status": "npx tsx scripts/testBuildingProcessorStatus.mts",
     "test:chapel-bell-schedule": "npx tsx scripts/testChapelBellSchedule.mts",
     "test:expanded-settlement": "npx tsx scripts/testExpandedSettlement.mts",
     "test:farming": "npx tsx scripts/testFarming.mts",

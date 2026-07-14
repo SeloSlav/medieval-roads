@@ -29,6 +29,7 @@ import { computePopulationStats, computeResourceTotals } from '../resources/reso
 import { WorldLayoutRegistry } from '../resources/WorldLayoutRegistry.ts';
 import type { TreeRegistry } from '../resources/TreeRegistry.ts';
 import { WorldQueries } from '../resources/WorldQueries.ts';
+import { getBuildingWorkExtentHighlight } from '../resources/inspector/buildingProcessorStatus.ts';
 import { RoadMaterialFactory } from '../roads/RoadMaterialFactory.ts';
 import { RoadNetwork } from '../roads/RoadNetwork.ts';
 import { RoadSelection } from '../roads/RoadSelection.ts';
@@ -634,9 +635,16 @@ export async function bootstrapAppSession(
     getMarketState: () => spacetimeStore.snapshot.marketState,
     ...inspectorActions,
     onSelectionChange: (target) => {
-      buildingMarkers.setSelectedWorkExtent(
-        target?.kind === 'building' ? target.building : null,
-      );
+      if (target?.kind === 'building') {
+        buildingMarkers.setSelectedWorkExtent(
+          target.building,
+          getBuildingWorkExtentHighlight(target.building, worldQueries, {
+            matureTrees: target.matureTrees,
+          }),
+        );
+        return;
+      }
+      buildingMarkers.setSelectedWorkExtent(null);
     },
     isBlocked: () => isWorldInspectionBlocked(placementGate),
   });

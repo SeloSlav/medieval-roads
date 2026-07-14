@@ -27,6 +27,7 @@ export class BuildingMarkers {
   private readonly buildingMeshes = new Map<string, THREE.Group>();
   private selectedWorkExtentMesh: THREE.Mesh | null = null;
   private selectedWorkExtentKind: BuildingKind | null = null;
+  private selectedWorkExtentHighlight: 'normal' | 'warning' = 'normal';
   private previewMesh: THREE.Mesh | null = null;
   private previewBuilding: THREE.Group | null = null;
   private previewKind: BuildingKind | null = null;
@@ -40,13 +41,17 @@ export class BuildingMarkers {
     options.parent.add(this.group);
   }
 
-  setSelectedWorkExtent(building: BuildingState | null): void {
+  setSelectedWorkExtent(
+    building: BuildingState | null,
+    highlight: 'normal' | 'warning' = 'normal',
+  ): void {
     if (!building || building.workRadius <= 0) {
       if (this.selectedWorkExtentMesh) this.selectedWorkExtentMesh.visible = false;
+      this.selectedWorkExtentHighlight = 'normal';
       return;
     }
 
-    const color = workExtentColor(building.kind);
+    const color = workExtentRingColor(building.kind, highlight);
     if (!this.selectedWorkExtentMesh || this.selectedWorkExtentKind !== building.kind) {
       if (this.selectedWorkExtentMesh) {
         disposeObject3D(this.selectedWorkExtentMesh);
@@ -55,8 +60,14 @@ export class BuildingMarkers {
       this.selectedWorkExtentMesh = createRadiusRing(color, 0.14);
       this.selectedWorkExtentKind = building.kind;
       this.group.add(this.selectedWorkExtentMesh);
+    } else if (this.selectedWorkExtentHighlight !== highlight) {
+      const material = this.selectedWorkExtentMesh.material;
+      if (material instanceof THREE.MeshBasicMaterial) {
+        material.color.set(color);
+      }
     }
 
+    this.selectedWorkExtentHighlight = highlight;
     const y = this.terrain.getHeightAt(building.x, building.z);
     this.selectedWorkExtentMesh.visible = true;
     this.selectedWorkExtentMesh.position.set(building.x, y + 0.15, building.z);
@@ -204,6 +215,12 @@ function syncBuildingVisualState(marker: THREE.Group, building: BuildingState): 
   segments.forEach((segment, index) => {
     segment.visible = index < visibleCount;
   });
+}
+
+const WORK_EXTENT_WARNING_COLOR = 0xf97316;
+
+function workExtentRingColor(kind: BuildingKind, highlight: 'normal' | 'warning'): number {
+  return highlight === 'warning' ? WORK_EXTENT_WARNING_COLOR : workExtentColor(kind);
 }
 
 function workExtentColor(kind: BuildingKind): number {

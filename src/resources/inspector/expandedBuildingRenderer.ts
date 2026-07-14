@@ -10,6 +10,7 @@ import {
 import { roadDeliveryTripSeconds } from '../../logistics/deliveryLogistics.ts';
 import type { BuildingKind, BuildingState, InspectableTarget } from '../types.ts';
 import { buildingDemolishHint, buildingLaborView, buildingRoadAccessRow, buildingStorageRows, buildingWorkRadiusRow } from './buildingCommon.ts';
+import { getBuildingProcessorStatus } from './buildingProcessorStatus.ts';
 import { renderInboundSupplyRow, renderOutboundDeliveryRows, type DeliveryStatusContext } from './deliveryStatusRows.ts';
 import type { DeliveryTripState } from '../../logistics/deliveryTrips.ts';
 import type { InspectorRenderContext, InspectorView } from './renderInspectableTarget.ts';
@@ -210,14 +211,15 @@ export function renderExpandedBuildingInspector(
 ): InspectorView {
   const { building } = target;
   const definition = getBuildingDefinition(building.kind);
-  const active = definition.acceptsLabor ? building.assignedLabor > 0 : true;
+  const processorStatus = getBuildingProcessorStatus(building, context.worldQueries);
+  const fallbackActive = definition.acceptsLabor ? building.assignedLabor > 0 : true;
   const logisticsRows = renderLogisticsRows(building, context);
   return {
     eyebrow: 'Settlement building',
     title: definition.label,
-    statusText: active ? 'Operating' : 'Awaiting workers',
-    statusState: active ? 'active' : 'warning',
-    detailsHtml: `<li><span>Role</span><span>${PROCESS[building.kind] ?? 'Settlement service'}</span></li>${buildingStorageRows(building, building.kind)}${buildingRoadAccessRow(context.worldQueries, building)}${buildingWorkRadiusRow(building.kind)}${logisticsRows}`,
+    statusText: processorStatus?.statusText ?? (fallbackActive ? 'Operating' : 'Awaiting workers'),
+    statusState: processorStatus?.statusState ?? (fallbackActive ? 'active' : 'warning'),
+    detailsHtml: `<li><span>Role</span><span>${PROCESS[building.kind] ?? 'Settlement service'}</span></li>${processorStatus?.waterDetailHtml ?? ''}${buildingStorageRows(building, building.kind)}${buildingRoadAccessRow(context.worldQueries, building)}${buildingWorkRadiusRow(building.kind)}${logisticsRows}`,
     demolish: { visible: true, hint: buildingDemolishHint(building.kind) },
     labor: buildingLaborView(building, context.populationStats),
   };

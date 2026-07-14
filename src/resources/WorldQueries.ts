@@ -9,6 +9,7 @@ import {
   findServingChapel,
   hasRoadPathToBuildingKind as landmarkHasRoadPathToBuildingKind,
   isResidenceInMonasteryCoverage,
+  monasteryLinkedToChapel,
 } from '../logistics/landmarkAccess.ts';
 import {
   FoodDeliveryClaimQueries,
@@ -420,6 +421,16 @@ export class WorldQueries {
     return isResidenceInMonasteryCoverage(
       residence,
       monasteries,
+      chapels,
+      (a, b, c, d) => this.getRoadPathDistance(a, b, c, d),
+    );
+  }
+
+  isMonasteryLinkedToChapel(monastery: BuildingState): boolean {
+    const state = this.getGameState();
+    const chapels = [...state.buildings.values()].filter((building) => building.kind === 'chapel');
+    return monasteryLinkedToChapel(
+      monastery,
       chapels,
       (a, b, c, d) => this.getRoadPathDistance(a, b, c, d),
     );

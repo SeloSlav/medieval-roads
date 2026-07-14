@@ -14,6 +14,7 @@ const tests = [
   'test:settlement-schedule',
   'test:world-config',
   'test:connection-recovery',
+  'test:building-processor-status',
   'test:chapel-bell-schedule',
   'test:expanded-settlement',
   'test:farming',
