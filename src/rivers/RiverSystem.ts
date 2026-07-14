@@ -8,6 +8,7 @@ import { createRiverReeds, type RiverReedField } from './RiverReeds.ts';
 import { createRiverShoreStones } from './RiverShoreStones.ts';
 import { createRiverWaterMesh, disposeSharedRiverWaterMaterial } from './RiverWaterMesh.ts';
 import type { RockObstacle } from '../utils/pathGeometry.ts';
+import type { RendererBackendKind } from '../scene/RendererBackend.ts';
 
 function createPropShadowMaterials(): {
   shadowCast: THREE.MeshStandardMaterial;
@@ -43,12 +44,14 @@ export type RiverSystem = {
   dispose: () => void;
 };
 
-export function createRiverSystem(
+export async function createRiverSystem(
   terrain: Terrain,
   riverField: RiverField,
   bankMaterial: MeshStandardNodeMaterial,
   rockTextures: MossyRockTextureSet,
-): RiverSystem {
+  maxAnisotropy: number,
+  rendererBackend: RendererBackendKind,
+): Promise<RiverSystem> {
   const group = new THREE.Group();
   group.name = 'River system';
 
@@ -58,7 +61,13 @@ export function createRiverSystem(
   const waterController = createRiverWaterMesh(group, terrain, riverField);
   const shoreStones = createRiverShoreStones(terrain, riverField, rockMaterial, rockShadowMaterials, rng);
   const bankMeshes = createRiverBankMeshes(terrain, riverField, bankMaterial);
-  const reeds: RiverReedField = createRiverReeds(terrain, riverField, mulberry32(0x8eed1212));
+  const reeds: RiverReedField = await createRiverReeds(
+    terrain,
+    riverField,
+    mulberry32(0x8eed1212),
+    maxAnisotropy,
+    rendererBackend,
+  );
   group.add(shoreStones.group, bankMeshes, reeds.group);
 
   const dispose = () => {

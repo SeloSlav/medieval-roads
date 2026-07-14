@@ -1,14 +1,16 @@
 import * as THREE from 'three';
-import { MeshStandardNodeMaterial } from 'three/webgpu';
-import { vertexColor } from 'three/tsl';
-import { applyFoliageDoubleSideNormalsNode } from '../scene/foliageDoubleSideNormals.ts';
 import { grassEdgeFadeFromFocusDistance, resolveReedLod } from '../grass/grassLodMath.ts';
+import type { RendererBackendKind } from '../scene/RendererBackend.ts';
 import type { Terrain } from '../terrain/Terrain.ts';
+import {
+  addSeedThreeGroundCoverInstanceAttributes,
+  createSeedThreeCardClumpGeometry,
+  createSeedThreeGroundCoverMaterial,
+  disposeSeedThreeGroundCoverTextures,
+  loadSeedThreeGroundCoverTextures,
+  seedThreeGroundCoverWindVector,
+} from '../vegetation/seedthree/seedThreeGroundCover.ts';
 import type { RiverField } from './RiverField.ts';
-
-type TslNode = {
-  rgb: TslNode;
-};
 
 type ReedPlacement = {
   x: number;
@@ -48,24 +50,49 @@ const composeScale = new THREE.Vector3();
 const composeEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const composeColor = new THREE.Color();
 /** Caps peak reed opacity so shoreline tufts stay muted against meadow grass. */
-const REED_PEAK_OPACITY = 0.78;
-/** Unit geometry tops out at ~1.28; this maps placement scale to world metres. */
-const REED_HEIGHT_MULTIPLIER = 1.42;
+const REED_PEAK_OPACITY = 0.9;
+/** The generated card is full-height; keep mature cattails around 1.2–2.1 metres. */
+const REED_HEIGHT_MULTIPLIER = 1.08;
 const REED_SHORE_MIN = 0.55;
 const REED_SHORE_MAX = 4.8;
 
-export function createRiverReeds(
+export async function createRiverReeds(
   terrain: Terrain,
   riverField: RiverField,
   rng: () => number,
-): RiverReedField {
+  maxAnisotropy: number,
+  rendererBackend: RendererBackendKind,
+): Promise<RiverReedField> {
   const placements = createReedPlacements(riverField, rng);
-  const geometry = createReedGeometry();
-  const material = createReedMaterial();
+  const textures = await loadSeedThreeGroundCoverTextures({
+    albedo: '/assets/textures/vegetation/cattail_reed_card.png',
+  }, maxAnisotropy);
+  const geometry = createSeedThreeCardClumpGeometry({
+    quads: 4,
+    width: 0.78,
+    tiltMin: 0.025,
+    tiltSpan: 0.12,
+    heightMin: 0.9,
+    heightSpan: 0.2,
+    baseSpread: 0.08,
+  });
+  const material = createSeedThreeGroundCoverMaterial(
+    'SeedThree cattail reeds',
+    textures,
+    rendererBackend,
+    [0.28, 0.42, 0.13],
+    0.22,
+  );
+  material.transparent = true;
+  material.opacity = 0;
+  material.alphaTest = 0.32;
+  material.depthWrite = true;
+  const capacity = Math.max(placements.length, 1);
+  const attributes = addSeedThreeGroundCoverInstanceAttributes(geometry, capacity);
 
-  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(placements.length, 1));
-  mesh.name = 'River reeds';
-  mesh.castShadow = true;
+  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+  mesh.name = 'SeedThree river cattail cards';
+  mesh.castShadow = false;
   mesh.receiveShadow = true;
   mesh.frustumCulled = false;
   mesh.renderOrder = 12;
@@ -79,14 +106,30 @@ export function createRiverReeds(
     mesh.instanceMatrix.needsUpdate = true;
   };
 
+  const fullScale = new THREE.Vector3();
+  const wind = new THREE.Vector3();
   placements.forEach((placement, index) => {
     composeColor.setHSL(placement.hue, placement.sat, placement.light);
+    composeColor.lerp(new THREE.Color(0xffffff), 0.55);
+    attributes.tint.setXYZ(index, composeColor.r, composeColor.g, composeColor.b);
+    attributes.anchor.setXYZ(
+      index,
+      placement.x,
+      terrain.getHeightAt(placement.x, placement.z) + 0.03,
+      placement.z,
+    );
+    resolveReedScaleVector(placement, fullScale);
+    seedThreeGroundCoverWindVector(placement.yaw, fullScale, wind);
+    attributes.wind.setXYZ(index, wind.x, wind.y, wind.z);
     mesh.setColorAt(index, composeColor);
   });
 
   hideAllInstances();
 
   mesh.instanceMatrix.needsUpdate = true;
+  attributes.tint.needsUpdate = true;
+  attributes.anchor.needsUpdate = true;
+  attributes.wind.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
   const group = new THREE.Group();
@@ -183,6 +226,7 @@ export function createRiverReeds(
     dispose: () => {
       geometry.dispose();
       material.dispose();
+      disposeSeedThreeGroundCoverTextures(textures);
     },
   };
 }
@@ -322,18 +366,26 @@ function composeReedMatrix(
   euler.set(placement.tiltX, placement.yaw, placement.tiltZ);
   quaternion.setFromEuler(euler);
   const fade = THREE.MathUtils.clamp(edgeFade, 0, 1);
-  const width = (0.38 + placement.scale * 0.18) * fade;
-  const height = placement.scale * REED_HEIGHT_MULTIPLIER * fade;
-  scaleVector.set(width, height, width);
+  resolveReedScaleVector(placement, scaleVector, fade);
   matrix.compose(position, quaternion, scaleVector);
+}
+
+function resolveReedScaleVector(
+  placement: ReedPlacement,
+  scaleVector: THREE.Vector3,
+  fade = 1,
+): THREE.Vector3 {
+  const width = (0.46 + placement.scale * 0.2) * fade;
+  const height = placement.scale * REED_HEIGHT_MULTIPLIER * fade;
+  return scaleVector.set(width, height, width);
 }
 
 /** Taller near the water line, shorter on the outer muddy fringe. */
 function resolveReedScale(shore: number, rng: () => number): number {
   const shoreT = THREE.MathUtils.clamp((shore - REED_SHORE_MIN) / (REED_SHORE_MAX - REED_SHORE_MIN), 0, 1);
   const inlandCurve = Math.pow(shoreT, 0.82);
-  const minScale = THREE.MathUtils.lerp(1.28, 0.64, inlandCurve);
-  const maxScale = THREE.MathUtils.lerp(2.28, 1.02, Math.pow(shoreT, 0.72));
+  const minScale = THREE.MathUtils.lerp(1.12, 0.58, inlandCurve);
+  const maxScale = THREE.MathUtils.lerp(1.88, 0.96, Math.pow(shoreT, 0.72));
   const roll = Math.pow(rng(), 1.06);
   let scale = THREE.MathUtils.lerp(minScale, maxScale, roll);
 
@@ -352,77 +404,4 @@ function hasMinimumDistance(points: ReedPlacement[], x: number, z: number, minDi
     if (dx * dx + dz * dz < minDistanceSq) return false;
   }
   return true;
-}
-
-function createReedMaterial(): MeshStandardNodeMaterial {
-  const material = new MeshStandardNodeMaterial();
-  material.name = 'River reed';
-  material.side = THREE.DoubleSide;
-  material.transparent = true;
-  material.opacity = 0;
-  material.alphaTest = 0.15;
-  material.depthWrite = true;
-  material.roughness = 0.94;
-  material.metalness = 0;
-  material.color.set(0xffffff);
-  material.colorNode = (vertexColor() as TslNode).rgb;
-  applyFoliageDoubleSideNormalsNode(material);
-  return material;
-}
-
-function createReedGeometry(): THREE.BufferGeometry {
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const colors: number[] = [];
-  const indices: number[] = [];
-  const blades = 7;
-
-  for (let blade = 0; blade < blades; blade++) {
-    const angle = (blade / blades) * Math.PI * 2 + (blade % 2) * 0.14;
-    const halfWidth = 0.2 + (blade % 3) * 0.045 + (blade % 2) * 0.012;
-    const heightScale = 0.72 + (blade % 4) * 0.085 + (blade % 3) * 0.04;
-    appendReedBlade(positions, normals, colors, indices, angle, halfWidth, heightScale);
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setIndex(indices);
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function appendReedBlade(
-  positions: number[],
-  normals: number[],
-  colors: number[],
-  indices: number[],
-  angle: number,
-  halfWidth: number,
-  heightScale: number,
-): void {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const base = positions.length / 3;
-
-  const rings = [
-    { y: 0, width: 0.04, shade: 0.45 },
-    { y: 0.14, width: 0.42, shade: 0.58 },
-    { y: 0.58, width: 0.92, shade: 0.76 },
-    { y: 1.02, width: 0.78, shade: 0.84 },
-    { y: 1.16, width: 1.08, shade: 0.82 },
-    { y: 1.28, width: 0.92, shade: 0.78 },
-  ].map((ring) => ({ ...ring, y: ring.y * heightScale }));
-
-  for (const ring of rings) {
-    positions.push(cos * halfWidth * ring.width, ring.y, sin * halfWidth * ring.width);
-    normals.push(cos * 0.42, 0.78, sin * 0.42);
-    colors.push(ring.shade, ring.shade * 1.02, ring.shade * 0.92);
-  }
-
-  for (let i = 0; i < rings.length - 2; i++) {
-    indices.push(base + i, base + i + 1, base + i + 2);
-  }
-  indices.push(base + rings.length - 3, base + rings.length - 2, base + rings.length - 1);
 }

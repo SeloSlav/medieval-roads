@@ -42,6 +42,7 @@ import {
   subscribeHydrologyOverlayPreference,
 } from './hydrologyOverlayPreference.ts';
 import type { LoadingPhase } from '../ui/loadingProgress.ts';
+import { createBerryPatchVisuals, type BerryPatchVisuals } from '../foraging/BerryPatchVisuals.ts';
 
 export type SceneLoadProgress = {
   label: string;
@@ -74,6 +75,7 @@ export class SceneManager {
   private skyAnimationTime = 0;
   private forestManager: ForestManager | null = null;
   private grassField: GrassBladeField | null = null;
+  private berryPatchVisuals: BerryPatchVisuals | null = null;
   private vegetationBuilt = false;
   private roadNetworkRef: RoadNetwork | null = null;
   private forestClearanceBuildings: BuildingTerrainSource[] = [];
@@ -244,11 +246,13 @@ export class SceneManager {
       fraction: 0.55,
     });
     await yieldToMain();
-    const riverSystem = createRiverSystem(
+    const riverSystem = await createRiverSystem(
       terrain,
       riverField,
       materials.riverBank,
       startupTextures.riverRock,
+      backend.maxAnisotropy,
+      backend.kind,
     );
     const quarrySystem = createQuarrySystem(terrain, quarryLayout, startupTextures.riverRock);
     await yieldToMain();
@@ -279,6 +283,15 @@ export class SceneManager {
       densityScale: forestDensityScale(this.worldLayout.settings.forestDensity),
       forestCores: this.worldLayout.forestCores,
     });
+    this.berryPatchVisuals = await createBerryPatchVisuals(
+      this.terrain,
+      this.worldLayout.foragingLayout.sites,
+      this.maxAnisotropy,
+      this.rendererBackend,
+      this.worldLayout.foragingLayout.seed,
+      (x, z) => this.riverSystem.isBlockedAt(x, z) || this.quarrySystem.isBlockedAt(x, z),
+    );
+    this.scene.add(this.berryPatchVisuals.group);
     if (GRASS_BLADES_ENABLED) {
       this.grassField = await createGrassBladeField(this.terrain, {
         isBlockedAt: (x, z) =>
@@ -582,6 +595,11 @@ export class SceneManager {
     if (this.grassField) {
       this.grassField.dispose();
       disposeObject3D(this.grassField.group);
+    }
+    if (this.berryPatchVisuals) {
+      this.berryPatchVisuals.dispose();
+      disposeObject3D(this.berryPatchVisuals.group);
+      this.berryPatchVisuals = null;
     }
     this.riverSystem.dispose();
     disposeObject3D(this.riverSystem.group);
