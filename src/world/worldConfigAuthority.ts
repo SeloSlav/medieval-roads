@@ -62,17 +62,23 @@ export function generationMatchesServer(
 }
 
 /**
- * True when a fresh or reset server no longer matches cached client world settings
- * and the player should pick generation settings again.
+ * True when cached client settings are stale relative to the server row and the
+ * player should pick generation settings again in the setup panel.
+ *
+ * When the server is not yet configured, bootstrap will publish local settings —
+ * do not force the setup panel in that case.
+ *
+ * When the server world is already running (simTick > 0), re-picking settings
+ * cannot help; bootstrap guards will surface a New world action instead.
  */
 export function shouldRequireWorldRegeneration(
   server: AuthoritativeWorldGeneration,
   simTick: number,
   local: WorldGenerationSettings | null,
 ): boolean {
-  if (!server.configured) return true;
+  if (!local) return true;
+  if (!server.configured) return false;
   if (simTick > 0) return false;
-  if (!local) return false;
   return !generationMatchesServer(server, local);
 }
 
@@ -86,7 +92,10 @@ export function assertWorldGenerationCompatible(
   if (generationMatchesServer(server, local)) return;
   if (simTick > 0) {
     throw new WorldGenerationMismatchError(
-      'This server world was generated with different settings. Use Game menu → New world… to start fresh.',
+      'This server world is already running with different map settings than your browser saved '
+      + `(server: ${server.mapSize}, saved: ${local.mapSize}). `
+      + 'Clearing SpacetimeDB alone does not reset an active world — use Start new world below, '
+      + 'or run deploy:local-clean in dev.',
     );
   }
 }

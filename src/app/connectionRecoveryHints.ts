@@ -35,7 +35,7 @@ export function formatBootstrapFailure(error: unknown): RecoveryErrorPresentatio
     return {
       label: 'World bootstrap failed',
       detail: message,
-      recoveryHint: `The server database is in a stale state. Retry after redeploying the server module.${devServerHint()} ${stuckHint(true)}`,
+      recoveryHint: `Your browser saved map settings (for example Small) do not match the server database, which was not fully reset. Use Start new world below, or clear this site's local storage and reload.${devServerHint()} ${stuckHint(false)}`,
       showNewWorldAction: true,
     };
   }
@@ -61,7 +61,7 @@ export function formatWorldGenerationMismatch(message: string): RecoveryErrorPre
   return {
     label: 'World settings mismatch',
     detail: message,
-    recoveryHint: `Your saved map settings no longer match this server world. ${stuckHint(true)}`,
+    recoveryHint: `Re-picking map size in the setup panel cannot fix a server that is already running. Use Start new world below to reset the server settlement.${devServerHint()} ${stuckHint(false)}`,
     showNewWorldAction: true,
   };
 }

@@ -9,7 +9,7 @@ const generationLock = formatBootstrapFailure(
   new Error('Cannot change world generation after the simulation has started.'),
 );
 assert.equal(generationLock.showNewWorldAction, true);
-assert.match(generationLock.recoveryHint, /stale state/i);
+assert.match(generationLock.recoveryHint, /Small/i);
 assert.match(generationLock.recoveryHint, /local storage/i);
 
 const timeout = formatBootstrapFailure(new Error('Timed out waiting for world_config subscription.'));

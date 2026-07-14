@@ -54,6 +54,8 @@ pub fn configure_world(
             hydrology,
             forest_density,
             configured: true,
+            // Repair idle ticks that ran before the first client published settings.
+            sim_tick: if !config.configured { 0 } else { config.sim_tick },
             ..config
         });
     }

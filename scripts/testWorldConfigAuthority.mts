@@ -74,7 +74,13 @@ assert.doesNotThrow(
 const unconfigured = { ...generation, configured: false };
 assert.equal(
   shouldRequireWorldRegeneration(unconfigured, 0, DEFAULT_WORLD_GENERATION_SETTINGS),
-  true,
+  false,
+);
+
+const smallWorld = { ...DEFAULT_WORLD_GENERATION_SETTINGS, mapSize: 'small' as const };
+assert.equal(
+  shouldRequireWorldRegeneration(unconfigured, 42, smallWorld),
+  false,
 );
 
 assert.equal(
@@ -84,7 +90,7 @@ assert.equal(
 
 assert.equal(
   shouldRequireWorldRegeneration(generation, 0, null),
-  false,
+  true,
 );
 
 assert.equal(
@@ -107,7 +113,16 @@ assert.equal(
     0,
     DEFAULT_WORLD_GENERATION_SETTINGS,
   ),
-  true,
+  false,
+);
+
+assert.equal(
+  shouldRequireWorldRegeneration(
+    { ...DEFAULT_WORLD_GENERATION_SETTINGS, mapSize: 'medium', configured: true },
+    42,
+    smallWorld,
+  ),
+  false,
 );
 
 console.log('world config authority tests passed');

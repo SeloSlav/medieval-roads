@@ -16,8 +16,8 @@ pub struct WorldConfig {
     pub hydrology: u8,
     #[default(50)]
     pub forest_density: u8,
-    /// False after reset_world until a client publishes generation settings.
-    #[default(true)]
+    /// False until a client publishes generation settings via configure_world.
+    #[default(false)]
     pub configured: bool,
 }
 
