@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { addTriangularGableWall } from '../meshPrimitives.ts';
 import {
   addMesh,
+  sharedBuildingMaterial,
   stoneMaterial,
   timberMaterial,
 } from '../buildingMaterials.ts';
@@ -207,7 +208,7 @@ export function addDarkOpening(
   addMesh(
     group,
     new THREE.BoxGeometry(width, height, 0.12),
-    new THREE.MeshStandardMaterial({ color: 0x1d1813, roughness: 1, metalness: 0 }),
+    sharedBuildingMaterial('interiorDark'),
     new THREE.Vector3(x, y, z + 0.07),
   );
 }
@@ -220,7 +221,6 @@ export function addSmallWindow(
   width = 0.78,
   height = 1.0,
 ): void {
-  const glass = new THREE.MeshStandardMaterial({ color: 0x30444d, roughness: 0.42, metalness: 0.03 });
   addMesh(
     group,
     new THREE.BoxGeometry(width + 0.22, height + 0.22, 0.08),
@@ -230,7 +230,7 @@ export function addSmallWindow(
   addMesh(
     group,
     new THREE.BoxGeometry(width, height, 0.08),
-    glass,
+    sharedBuildingMaterial('glass'),
     new THREE.Vector3(x, y, z + 0.06),
   );
   addMesh(

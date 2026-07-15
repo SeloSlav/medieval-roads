@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { loadBitmapTexture } from '../utils/textureLoad.ts';
+import { prepareBuildingGeometryUvs } from './buildingMetricUvs.ts';
 
 export const GORSKI_PALETTE = {
   stoneWhite: 0xe6dfd0,
@@ -54,81 +56,301 @@ export const QUARRY_ROCK_PALETTE = {
   spoil: 0x5c5854,
 } as const;
 
+type TextureFamily = 'plaster' | 'masonry' | 'clayTiles' | 'woodPlanks';
+
+/**
+ * The complete shared construction palette. Keeping this list deliberately
+ * small lets every building reuse the same renderer programs, material state,
+ * and texture objects while tinting a few culturally consistent variants.
+ */
+export type BuildingMaterialKey =
+  | 'plasterWhite'
+  | 'plasterYellow'
+  | 'plasterGrey'
+  | 'plasterOrange'
+  | 'masonryLight'
+  | 'masonryMid'
+  | 'masonryDark'
+  | 'timberDark'
+  | 'timberMid'
+  | 'timberLight'
+  | 'timberWeathered'
+  | 'clayRed'
+  | 'clayDark'
+  | 'shingle'
+  | 'slate'
+  | 'metalIron'
+  | 'glass'
+  | 'moss'
+  | 'grassRoof'
+  | 'interiorDark';
+
+type MaterialDefinition = {
+  color: number;
+  roughness: number;
+  metalness: number;
+  textureFamily?: TextureFamily;
+  normalScale?: number;
+};
+
+const MATERIAL_DEFINITIONS: Record<BuildingMaterialKey, MaterialDefinition> = {
+  plasterWhite: { color: 0xffffff, roughness: 0.92, metalness: 0, textureFamily: 'plaster', normalScale: 0.42 },
+  plasterYellow: { color: 0xeadc9f, roughness: 0.93, metalness: 0, textureFamily: 'plaster', normalScale: 0.42 },
+  plasterGrey: { color: 0xb8b4af, roughness: 0.94, metalness: 0, textureFamily: 'plaster', normalScale: 0.46 },
+  plasterOrange: { color: 0xe6b17e, roughness: 0.93, metalness: 0, textureFamily: 'plaster', normalScale: 0.44 },
+  masonryLight: { color: 0xf0e9dc, roughness: 0.96, metalness: 0, textureFamily: 'masonry', normalScale: 0.72 },
+  masonryMid: { color: 0xc5beb2, roughness: 0.97, metalness: 0, textureFamily: 'masonry', normalScale: 0.78 },
+  masonryDark: { color: 0x858688, roughness: 0.98, metalness: 0, textureFamily: 'masonry', normalScale: 0.82 },
+  timberDark: { color: 0x72533d, roughness: 0.91, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.62 },
+  timberMid: { color: 0x987359, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.58 },
+  timberLight: { color: 0xb68f70, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.55 },
+  timberWeathered: { color: 0x9b856f, roughness: 0.94, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.68 },
+  clayRed: { color: 0xffffff, roughness: 0.84, metalness: 0.01, textureFamily: 'clayTiles', normalScale: 0.74 },
+  clayDark: { color: 0xc58f84, roughness: 0.88, metalness: 0.01, textureFamily: 'clayTiles', normalScale: 0.78 },
+  shingle: { color: 0x806856, roughness: 0.95, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.72 },
+  slate: { color: 0x737980, roughness: 0.91, metalness: 0.02, textureFamily: 'masonry', normalScale: 0.48 },
+  metalIron: { color: 0x4a4846, roughness: 0.55, metalness: 0.72 },
+  glass: { color: 0x30444d, roughness: 0.36, metalness: 0.04 },
+  moss: { color: GORSKI_PALETTE.moss, roughness: 0.98, metalness: 0 },
+  grassRoof: { color: GORSKI_PALETTE.grassRoof, roughness: 0.99, metalness: 0 },
+  interiorDark: { color: GORSKI_PALETTE.interiorDark, roughness: 1, metalness: 0 },
+};
+
+const TEXTURE_METERS: Record<TextureFamily, number> = {
+  plaster: 2.5,
+  masonry: 2.4,
+  clayTiles: 4,
+  woodPlanks: 2,
+};
+
+type BuildingTextureSet = {
+  map: THREE.Texture;
+  normalMap: THREE.Texture;
+  roughnessMap: THREE.Texture;
+};
+
+const BUILDING_TEXTURE_URLS: Record<TextureFamily, { map: string; normalMap: string; roughnessMap: string }> = {
+  plaster: {
+    map: '/textures/buildings/plaster_diff.jpg',
+    normalMap: '/textures/buildings/plaster_nor_gl.png',
+    roughnessMap: '/textures/buildings/plaster_rough.jpg',
+  },
+  masonry: {
+    map: '/textures/buildings/masonry_diff.jpg',
+    normalMap: '/textures/buildings/masonry_nor_gl.png',
+    roughnessMap: '/textures/buildings/masonry_rough.jpg',
+  },
+  clayTiles: {
+    map: '/textures/buildings/clay_tiles_diff.jpg',
+    normalMap: '/textures/buildings/clay_tiles_nor_gl.png',
+    roughnessMap: '/textures/buildings/clay_tiles_rough.jpg',
+  },
+  woodPlanks: {
+    map: '/textures/buildings/wood_planks_diff.jpg',
+    normalMap: '/textures/buildings/wood_planks_nor_gl.png',
+    roughnessMap: '/textures/buildings/wood_planks_rough.jpg',
+  },
+};
+
+const materialCache = new Map<BuildingMaterialKey, THREE.MeshStandardMaterial>();
+export type BuildingDetailMaterialKey =
+  | 'brass'
+  | 'paintRed'
+  | 'paintBlue'
+  | 'paintOchre'
+  | 'water'
+  | 'smoke'
+  | 'earth'
+  | 'foliage'
+  | 'crop';
+
+type DetailMaterialDefinition = Omit<THREE.MeshStandardMaterialParameters, 'normalScale'> & {
+  textureFamily?: TextureFamily;
+  buildingNormalScale?: number;
+};
+
+const DETAIL_MATERIAL_DEFINITIONS: Record<BuildingDetailMaterialKey, DetailMaterialDefinition> = {
+  brass: { color: 0x9b7134, roughness: 0.48, metalness: 0.72 },
+  paintRed: { color: 0xb75a4d, roughness: 0.89, metalness: 0, textureFamily: 'woodPlanks', buildingNormalScale: 0.22 },
+  paintBlue: { color: 0x668996, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', buildingNormalScale: 0.22 },
+  paintOchre: { color: 0xd4ae62, roughness: 0.91, metalness: 0, textureFamily: 'woodPlanks', buildingNormalScale: 0.22 },
+  water: { color: 0x315868, roughness: 0.32, metalness: 0.04 },
+  smoke: { color: 0x77736d, roughness: 1, metalness: 0, transparent: true, opacity: 0.28, depthWrite: false },
+  earth: { color: 0x6d5235, roughness: 1, metalness: 0 },
+  foliage: { color: 0x526f3b, roughness: 1, metalness: 0 },
+  crop: { color: 0xb69a48, roughness: 1, metalness: 0 },
+};
+
+const detailMaterialCache = new Map<BuildingDetailMaterialKey, THREE.MeshStandardMaterial>();
+let textureSets: Record<TextureFamily, BuildingTextureSet> | null = null;
+let textureLoadPromise: Promise<void> | null = null;
+
+export function sharedBuildingMaterial(key: BuildingMaterialKey): THREE.MeshStandardMaterial {
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  const definition = MATERIAL_DEFINITIONS[key];
+  const material = new THREE.MeshStandardMaterial({
+    color: definition.color,
+    roughness: definition.roughness,
+    metalness: definition.metalness,
+  });
+  material.name = `Shared building material: ${key}`;
+  material.userData.sharedBuildingMaterial = true;
+  if (definition.textureFamily) {
+    material.userData.metricUvMeters = TEXTURE_METERS[definition.textureFamily];
+  }
+  materialCache.set(key, material);
+  applyTextureSet(material, definition);
+  return material;
+}
+
+/** Shared non-structural materials used by building props and painted trim. */
+export function sharedBuildingDetailMaterial(key: BuildingDetailMaterialKey): THREE.MeshStandardMaterial {
+  const cached = detailMaterialCache.get(key);
+  if (cached) return cached;
+  const definition = DETAIL_MATERIAL_DEFINITIONS[key];
+  const { textureFamily, buildingNormalScale, ...parameters } = definition;
+  const material = new THREE.MeshStandardMaterial(parameters);
+  material.name = `Shared building detail material: ${key}`;
+  material.userData.sharedBuildingMaterial = true;
+  if (textureFamily) material.userData.metricUvMeters = TEXTURE_METERS[textureFamily];
+  detailMaterialCache.set(key, material);
+  applyDetailTextureSet(material, definition);
+  return material;
+}
+
+/** Loads the four 1K CC0 texture sets once and attaches them to all shared materials. */
+export function initializeBuildingMaterialLibrary(maxAnisotropy = 8): Promise<void> {
+  if (textureSets) return Promise.resolve();
+  if (textureLoadPromise) return textureLoadPromise;
+
+  const anisotropy = Math.max(1, Math.min(8, maxAnisotropy));
+  textureLoadPromise = Promise.all(
+    (Object.keys(BUILDING_TEXTURE_URLS) as TextureFamily[]).map(async (family) => {
+      const urls = BUILDING_TEXTURE_URLS[family];
+      const [map, normalMap, roughnessMap] = await Promise.all([
+        loadBitmapTexture(urls.map, anisotropy, { srgb: true, anisotropyLimit: 8 }),
+        loadBitmapTexture(urls.normalMap, anisotropy, { anisotropyLimit: 8 }),
+        loadBitmapTexture(urls.roughnessMap, anisotropy, { anisotropyLimit: 8 }),
+      ]);
+      map.name = `Building ${family} diffuse`;
+      normalMap.name = `Building ${family} normal`;
+      roughnessMap.name = `Building ${family} roughness`;
+      return [family, { map, normalMap, roughnessMap }] as const;
+    }),
+  ).then((entries) => {
+    textureSets = Object.fromEntries(entries) as Record<TextureFamily, BuildingTextureSet>;
+    for (const [key, material] of materialCache) {
+      applyTextureSet(material, MATERIAL_DEFINITIONS[key]);
+    }
+    for (const [key, material] of detailMaterialCache) {
+      applyDetailTextureSet(material, DETAIL_MATERIAL_DEFINITIONS[key]);
+    }
+  }).catch((error) => {
+    textureLoadPromise = null;
+    throw error;
+  });
+  return textureLoadPromise;
+}
+
+export function disposeBuildingMaterialLibrary(): void {
+  for (const material of materialCache.values()) material.dispose();
+  for (const material of detailMaterialCache.values()) material.dispose();
+  if (textureSets) {
+    const textures = new Set<THREE.Texture>();
+    for (const set of Object.values(textureSets)) {
+      textures.add(set.map);
+      textures.add(set.normalMap);
+      textures.add(set.roughnessMap);
+    }
+    for (const texture of textures) texture.dispose();
+  }
+  textureSets = null;
+  textureLoadPromise = null;
+}
+
+export function getBuildingMaterialLibraryStats(): { constructionMaterials: number; detailMaterials: number; textures: number; loaded: boolean } {
+  return {
+    constructionMaterials: materialCache.size,
+    detailMaterials: detailMaterialCache.size,
+    textures: textureSets ? new Set(Object.values(textureSets).flatMap((set) => [set.map, set.normalMap, set.roughnessMap])).size : 0,
+    loaded: textureSets !== null,
+  };
+}
+
+function applyTextureSet(material: THREE.MeshStandardMaterial, definition: MaterialDefinition): void {
+  if (!definition.textureFamily || !textureSets) return;
+  const set = textureSets[definition.textureFamily];
+  material.map = set.map;
+  material.normalMap = set.normalMap;
+  material.roughnessMap = set.roughnessMap;
+  material.normalScale.setScalar(definition.normalScale ?? 1);
+  material.needsUpdate = true;
+}
+
+function applyDetailTextureSet(
+  material: THREE.MeshStandardMaterial,
+  definition: DetailMaterialDefinition,
+): void {
+  if (!definition.textureFamily || !textureSets) return;
+  const set = textureSets[definition.textureFamily];
+  material.map = set.map;
+  material.normalMap = set.normalMap;
+  material.roughnessMap = set.roughnessMap;
+  material.normalScale.setScalar(definition.buildingNormalScale ?? 1);
+  material.needsUpdate = true;
+}
+
 export function quarryRockMaterial(
   shade: keyof typeof QUARRY_ROCK_PALETTE = 'mid',
 ): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: QUARRY_ROCK_PALETTE[shade],
-    roughness: 0.96,
-    metalness: 0,
-  });
+  if (shade === 'light') return sharedBuildingMaterial('masonryLight');
+  if (shade === 'dark' || shade === 'spoil') return sharedBuildingMaterial('masonryDark');
+  return sharedBuildingMaterial('masonryMid');
 }
 
 export function stoneMaterial(shade: 'light' | 'mid' | 'mortar' = 'mid'): THREE.MeshStandardMaterial {
-  const color =
-    shade === 'light'
-      ? GORSKI_PALETTE.stoneWhite
-      : shade === 'mortar'
-        ? GORSKI_PALETTE.stoneMortar
-        : GORSKI_PALETTE.stoneWhiteShadow;
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.94, metalness: 0 });
+  if (shade === 'light') return sharedBuildingMaterial('masonryLight');
+  if (shade === 'mortar') return sharedBuildingMaterial('masonryDark');
+  return sharedBuildingMaterial('masonryMid');
 }
 
 export function timberMaterial(shade: 'dark' | 'mid' | 'light' | 'weathered' = 'mid'): THREE.MeshStandardMaterial {
-  const color =
-    shade === 'dark'
-      ? GORSKI_PALETTE.timberDark
-      : shade === 'light'
-        ? GORSKI_PALETTE.timberLight
-        : shade === 'weathered'
-          ? GORSKI_PALETTE.timberWeathered
-          : GORSKI_PALETTE.timberMid;
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0 });
+  if (shade === 'dark') return sharedBuildingMaterial('timberDark');
+  if (shade === 'light') return sharedBuildingMaterial('timberLight');
+  if (shade === 'weathered') return sharedBuildingMaterial('timberWeathered');
+  return sharedBuildingMaterial('timberMid');
 }
 
 export function tileMaterial(variant: 0 | 1 | 2 = 0): THREE.MeshStandardMaterial {
-  const colors = [GORSKI_PALETTE.tileRed, GORSKI_PALETTE.tileRedDark, GORSKI_PALETTE.tileRedHighlight] as const;
-  return new THREE.MeshStandardMaterial({ color: colors[variant], roughness: 0.82, metalness: 0.02 });
+  return sharedBuildingMaterial(variant === 1 ? 'clayDark' : 'clayRed');
 }
 
 export function shingleMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: GORSKI_PALETTE.shingleWood,
-    roughness: 0.92,
-    metalness: 0,
-  });
+  return sharedBuildingMaterial('shingle');
 }
 
-export function residenceFacadeMaterial(
-  facade: ResidenceFacadeColor,
-): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: RESIDENCE_FACADE_PALETTE[facade],
-    roughness: 0.9,
-    metalness: 0,
-  });
+export function residenceFacadeMaterial(facade: ResidenceFacadeColor): THREE.MeshStandardMaterial {
+  if (facade === 'yellow') return sharedBuildingMaterial('plasterYellow');
+  if (facade === 'grey') return sharedBuildingMaterial('plasterGrey');
+  if (facade === 'lightOrange' || facade === 'orange') return sharedBuildingMaterial('plasterOrange');
+  return sharedBuildingMaterial('plasterWhite');
 }
 
 export function residenceRoofMaterial(roof: ResidenceRoofColor): THREE.MeshStandardMaterial {
-  const spec = RESIDENCE_ROOF_SPECS[roof];
-  return new THREE.MeshStandardMaterial({
-    color: RESIDENCE_ROOF_PALETTE[roof],
-    roughness: spec.roughness,
-    metalness: spec.metalness,
-  });
+  if (roof === 'red') return sharedBuildingMaterial('clayRed');
+  if (roof === 'brown') return sharedBuildingMaterial('shingle');
+  return sharedBuildingMaterial('slate');
 }
 
 export function mossMaterial(kind: 'moss' | 'grass' = 'moss'): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
-    color: kind === 'grass' ? GORSKI_PALETTE.grassRoof : GORSKI_PALETTE.moss,
-    roughness: 0.98,
-    metalness: 0,
-  });
+  return sharedBuildingMaterial(kind === 'grass' ? 'grassRoof' : 'moss');
 }
 
 export function metalMaterial(shade: 'iron' | 'steel' = 'iron'): THREE.MeshStandardMaterial {
-  const color = shade === 'steel' ? 0x6b7078 : 0x4a4846;
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.72 });
+  void shade;
+  return sharedBuildingMaterial('metalIron');
 }
 
 export function addMesh(
@@ -139,7 +361,7 @@ export function addMesh(
   rotation = new THREE.Euler(),
   scale = new THREE.Vector3(1, 1, 1),
 ): THREE.Mesh {
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(prepareBuildingGeometryUvs(geometry, material), material);
   mesh.position.copy(position);
   mesh.rotation.copy(rotation);
   mesh.scale.copy(scale);

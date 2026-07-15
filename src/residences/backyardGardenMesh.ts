@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import type { BackyardGardenKind } from '../generated/gameBalance.ts';
-import { GORSKI_PALETTE } from '../buildings/buildingMaterials.ts';
+import {
+  sharedBuildingDetailMaterial,
+  sharedBuildingMaterial,
+} from '../buildings/buildingMaterials.ts';
+import { prepareBuildingGeometryUvs } from '../buildings/buildingMetricUvs.ts';
 import { mulberry32 } from '../utils/random.ts';
 import type { BackyardPlantCatalog } from '../vegetation/seedthree/backyardPlantAssets.ts';
 
@@ -16,10 +20,10 @@ const MATERIALS = {
   darkSoil: new THREE.MeshStandardMaterial({ color: 0x35271d, roughness: 0.98 }),
   path: new THREE.MeshStandardMaterial({ color: 0x8a795f, roughness: 0.98 }),
   grass: new THREE.MeshStandardMaterial({ color: 0x607b42, roughness: 0.96 }),
-  timber: new THREE.MeshStandardMaterial({ color: GORSKI_PALETTE.timberMid, roughness: 0.92 }),
-  darkTimber: new THREE.MeshStandardMaterial({ color: GORSKI_PALETTE.timberDark, roughness: 0.93 }),
-  wicker: new THREE.MeshStandardMaterial({ color: 0x89643e, roughness: 0.94 }),
-  stone: new THREE.MeshStandardMaterial({ color: GORSKI_PALETTE.stoneWhiteShadow, roughness: 0.96 }),
+  timber: sharedBuildingMaterial('timberMid'),
+  darkTimber: sharedBuildingMaterial('timberDark'),
+  wicker: sharedBuildingMaterial('timberLight'),
+  stone: sharedBuildingMaterial('masonryMid'),
   leaf: new THREE.MeshStandardMaterial({ color: 0x527a3d, roughness: 0.9 }),
   leafLight: new THREE.MeshStandardMaterial({ color: 0x739650, roughness: 0.9 }),
   herb: new THREE.MeshStandardMaterial({ color: 0x66834e, roughness: 0.91 }),
@@ -30,7 +34,7 @@ const MATERIALS = {
   cabbage: new THREE.MeshStandardMaterial({ color: 0x759c5c, roughness: 0.9 }),
   squash: new THREE.MeshStandardMaterial({ color: 0x4d7939, roughness: 0.9 }),
   terracotta: new THREE.MeshStandardMaterial({ color: 0x9b4c36, roughness: 0.88 }),
-  water: new THREE.MeshStandardMaterial({ color: 0x435d67, roughness: 0.4, metalness: 0.03 }),
+  water: sharedBuildingDetailMaterial('water'),
 } as const;
 
 const FLOWER_MATERIALS = [
@@ -52,7 +56,7 @@ function addMesh(
   scale = new THREE.Vector3(1, 1, 1),
   name?: string,
 ): THREE.Mesh {
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(prepareBuildingGeometryUvs(geometry, material), material);
   mesh.position.set(x, y, z);
   mesh.rotation.copy(rotation);
   mesh.scale.copy(scale);

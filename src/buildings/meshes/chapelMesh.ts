@@ -3,6 +3,8 @@ import {
   addMesh,
   metalMaterial,
   residenceFacadeMaterial,
+  sharedBuildingDetailMaterial,
+  sharedBuildingMaterial,
   stoneMaterial,
   tileMaterial,
   timberMaterial,
@@ -22,18 +24,12 @@ type ChapelMaterials = {
 function createChapelMaterials(): ChapelMaterials {
   return {
     limewash: residenceFacadeMaterial('white'),
-    limewashShade: new THREE.MeshStandardMaterial({ color: 0xd3c9b9, roughness: 0.94, metalness: 0 }),
-    glass: new THREE.MeshStandardMaterial({
-      color: 0x557481,
-      roughness: 0.34,
-      metalness: 0.08,
-      emissive: 0x172c33,
-      emissiveIntensity: 0.35,
-    }),
-    brass: new THREE.MeshStandardMaterial({ color: 0x9b7134, roughness: 0.48, metalness: 0.72 }),
-    redPaint: new THREE.MeshStandardMaterial({ color: 0xa84437, roughness: 0.88, metalness: 0 }),
-    bluePaint: new THREE.MeshStandardMaterial({ color: 0x466b78, roughness: 0.9, metalness: 0 }),
-    ochrePaint: new THREE.MeshStandardMaterial({ color: 0xc39a4a, roughness: 0.9, metalness: 0 }),
+    limewashShade: sharedBuildingMaterial('plasterGrey'),
+    glass: sharedBuildingMaterial('glass'),
+    brass: sharedBuildingDetailMaterial('brass'),
+    redPaint: sharedBuildingDetailMaterial('paintRed'),
+    bluePaint: sharedBuildingDetailMaterial('paintBlue'),
+    ochrePaint: sharedBuildingDetailMaterial('paintOchre'),
   };
 }
 

@@ -6,6 +6,8 @@ import {
   addMesh,
   residenceFacadeMaterial,
   residenceRoofMaterial,
+  sharedBuildingDetailMaterial,
+  sharedBuildingMaterial,
   stoneMaterial,
   timberMaterial,
 } from '../buildings/buildingMaterials.ts';
@@ -21,21 +23,18 @@ import type { ResidenceState } from '../resources/types.ts';
 import { RESIDENCE_FIREWOOD_CAPACITY } from '../generated/gameBalance.ts';
 import { hashStringSeed } from '../utils/random.ts';
 
-const WINDOW_MATERIAL = new THREE.MeshStandardMaterial({
-  color: 0x2a3540,
-  roughness: 0.35,
-  metalness: 0.05,
-  emissive: 0x1a2530,
-  emissiveIntensity: 0.15,
-});
-
 const WINDOW_GLOW_EMISSIVE = 0xffc060;
 const WINDOW_GLOW_COLOR = 0x4a3820;
 const WINDOW_DARK_EMISSIVE = 0x1a2530;
 const WINDOW_DARK_COLOR = 0x2a3540;
 
 function createWindowMaterial(): THREE.MeshStandardMaterial {
-  return WINDOW_MATERIAL.clone();
+  const material = sharedBuildingMaterial('glass').clone();
+  material.name = 'Residence window (dynamic glow)';
+  material.userData.sharedBuildingMaterial = false;
+  material.emissive.setHex(WINDOW_DARK_EMISSIVE);
+  material.emissiveIntensity = 0.15;
+  return material;
 }
 
 export function applyResidenceWindowGlow(
@@ -91,14 +90,10 @@ function dimensionsForTier(archetype: ResidenceArchetype, tier: 1 | 2 | 3): Hous
 }
 
 function residenceTrimMaterial(trim: ResidenceTrimColor): THREE.MeshStandardMaterial {
-  const color = trim === 'red'
-    ? 0x9f4538
-    : trim === 'blue'
-      ? 0x456774
-      : trim === 'green'
-        ? 0x536a43
-        : 0x5a4030;
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.9, metalness: 0 });
+  if (trim === 'red') return sharedBuildingDetailMaterial('paintRed');
+  if (trim === 'blue') return sharedBuildingDetailMaterial('paintBlue');
+  if (trim === 'green') return sharedBuildingMaterial('moss');
+  return sharedBuildingMaterial('timberDark');
 }
 
 function addFrontWindow(
@@ -695,22 +690,11 @@ function syncFirewoodPile(marker: THREE.Group, firewoodStock: number): void {
 }
 
 function disposeGroup(group: THREE.Group): void {
-  const disposedMaterials = new Set<THREE.Material>();
   const windowMaterial = group.userData.windowMaterial as THREE.Material | undefined;
-  if (windowMaterial) {
-    windowMaterial.dispose();
-    disposedMaterials.add(windowMaterial);
-  }
+  if (windowMaterial) windowMaterial.dispose();
   group.traverse((child) => {
     if (child instanceof THREE.Mesh) {
       child.geometry.dispose();
-      const material = child.material;
-      const entries = Array.isArray(material) ? material : [material];
-      for (const entry of entries) {
-        if (disposedMaterials.has(entry)) continue;
-        entry.dispose();
-        disposedMaterials.add(entry);
-      }
     }
   });
 }

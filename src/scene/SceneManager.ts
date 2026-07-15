@@ -44,6 +44,10 @@ import {
 import type { LoadingPhase } from '../ui/loadingProgress.ts';
 import { createBerryPatchVisuals, type BerryPatchVisuals } from '../foraging/BerryPatchVisuals.ts';
 import { createDeerWildlifeVisuals, type DeerWildlifeVisuals } from '../foraging/DeerWildlifeVisuals.ts';
+import {
+  disposeBuildingMaterialLibrary,
+  initializeBuildingMaterialLibrary,
+} from '../buildings/buildingMaterials.ts';
 
 export type SceneLoadProgress = {
   label: string;
@@ -202,6 +206,7 @@ export class SceneManager {
       createPreferredRenderer(),
       materialsPromise ?? RoadMaterialFactory.create(8),
       startupTexturesPromise ?? beginStartupTextureLoad(),
+      initializeBuildingMaterialLibrary(8),
     ]);
     applyMaxAnisotropy(startupTextures, backend.maxAnisotropy);
     container.appendChild(backend.renderer.domElement);
@@ -659,6 +664,7 @@ export class SceneManager {
     disposeObject3D(this.selectionGroup);
     this.terrain.dispose();
     this.materials.dispose();
+    disposeBuildingMaterialLibrary();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

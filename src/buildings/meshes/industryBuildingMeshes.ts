@@ -3,6 +3,7 @@ import {
   addMesh,
   metalMaterial,
   residenceFacadeMaterial,
+  sharedBuildingDetailMaterial,
   shingleMaterial,
   stoneMaterial,
   tileMaterial,
@@ -216,7 +217,7 @@ function addNurseryPergola(group: THREE.Group, halfW: number): void {
       addMesh(
         group,
         new THREE.ConeGeometry(0.22, 0.72 + i * 0.05, 7),
-        new THREE.MeshStandardMaterial({ color: 0x496847, roughness: 1, metalness: 0 }),
+        sharedBuildingDetailMaterial('foliage'),
         new THREE.Vector3(centerX + (row - 0.5) * 0.72, 0.36, -1.15 + i * 0.75),
       );
     }

@@ -190,7 +190,9 @@ export class BuildingMarkers {
     const marker = this.buildingMeshes.get(id);
     if (!marker) return;
     this.group.remove(marker);
-    disposeObject3D(marker, true);
+    // Construction materials and textures belong to BuildingMaterialLibrary;
+    // individual buildings own only their geometry.
+    disposeObject3D(marker);
     this.buildingMeshes.delete(id);
   }
 }

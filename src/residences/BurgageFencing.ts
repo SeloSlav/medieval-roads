@@ -155,8 +155,8 @@ export class BurgageFencing {
   dispose(): void {
     this.posts.geometry.dispose();
     this.rails.geometry.dispose();
-    this.postMaterial.dispose();
-    this.railMaterial.dispose();
+    // Timber materials are shared by all buildings and disposed by the
+    // BuildingMaterialLibrary at scene teardown.
     this.root.removeFromParent();
   }
 }

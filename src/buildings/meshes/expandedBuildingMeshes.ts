@@ -3,6 +3,7 @@ import {
   addMesh,
   metalMaterial,
   residenceFacadeMaterial,
+  sharedBuildingDetailMaterial,
   shingleMaterial,
   stoneMaterial,
   tileMaterial,
@@ -10,15 +11,15 @@ import {
 } from '../buildingMaterials.ts';
 import { addBarrel, addDarkOpening, addGableShell, addPlankDoor, addSmallWindow } from './buildingMeshKit.ts';
 
-const earth = new THREE.MeshStandardMaterial({ color: 0x6d5235, roughness: 1 });
-const crop = new THREE.MeshStandardMaterial({ color: 0xb69a48, roughness: 1 });
-const leaf = new THREE.MeshStandardMaterial({ color: 0x4c6b38, roughness: 1 });
-const wineLeaf = new THREE.MeshStandardMaterial({ color: 0x526f3b, roughness: 1 });
-const grape = new THREE.MeshStandardMaterial({ color: 0x503f67, roughness: 0.92 });
-const canvas = new THREE.MeshStandardMaterial({ color: 0xb69c6a, roughness: 1 });
-const copper = new THREE.MeshStandardMaterial({ color: 0x9b5b32, roughness: 0.56, metalness: 0.38 });
-const hiveBlue = new THREE.MeshStandardMaterial({ color: 0x526f76, roughness: 0.95 });
-const hiveRed = new THREE.MeshStandardMaterial({ color: 0x8f513f, roughness: 0.95 });
+const earth = sharedBuildingDetailMaterial('earth');
+const crop = sharedBuildingDetailMaterial('crop');
+const leaf = sharedBuildingDetailMaterial('foliage');
+const wineLeaf = sharedBuildingDetailMaterial('foliage');
+const grape = sharedBuildingDetailMaterial('paintBlue');
+const canvas = residenceFacadeMaterial('yellow');
+const copper = sharedBuildingDetailMaterial('brass');
+const hiveBlue = sharedBuildingDetailMaterial('paintBlue');
+const hiveRed = sharedBuildingDetailMaterial('paintRed');
 
 function addChimney(group: THREE.Group, x: number, z: number, height = 4.8): void {
   addMesh(group, new THREE.BoxGeometry(0.72, height, 0.72), stoneMaterial('mid'), new THREE.Vector3(x, height * 0.5, z));
@@ -121,7 +122,7 @@ export function createSmokehouseMesh(): THREE.Group {
   addPlankDoor(group, -1.0, 1.53, shell.frontZ + 0.03, 0.92, 1.78);
   addSmallWindow(group, 1.25, 2.55, shell.frontZ + 0.03, 0.58, 0.72);
   addChimney(group, 1.85, -1.4, 5.4);
-  const smoke = addMesh(group, new THREE.ConeGeometry(0.42, 1.5, 8), new THREE.MeshStandardMaterial({ color: 0x77736d, transparent: true, opacity: 0.28 }), new THREE.Vector3(1.85, 6.2, -1.4));
+  const smoke = addMesh(group, new THREE.ConeGeometry(0.42, 1.5, 8), sharedBuildingDetailMaterial('smoke'), new THREE.Vector3(1.85, 6.2, -1.4));
   smoke.name = 'Smoke plume';
   for (let i = -2; i <= 2; i++) addMesh(group, new THREE.BoxGeometry(0.08, 0.36, 0.08), metalMaterial('iron'), new THREE.Vector3(i * 0.2, 3.15, shell.frontZ + 0.08));
   // Fuel lean-to and restrained drying rail communicate the complete preservation process.
@@ -129,7 +130,7 @@ export function createSmokehouseMesh(): THREE.Group {
   for (const z of [-0.9, 0.9]) addMesh(group, new THREE.BoxGeometry(0.16, 2.0, 0.16), timberMaterial('dark'), new THREE.Vector3(-5.1, 1.0, z));
   for (let row = 0; row < 3; row++) for (let i = 0; i < 4; i++) addMesh(group, new THREE.CylinderGeometry(0.13, 0.16, 1.05, 8), timberMaterial(i % 2 ? 'light' : 'mid'), new THREE.Vector3(-4.1 + i * 0.42, 0.22 + row * 0.34, 0.2));
   addMesh(group, new THREE.BoxGeometry(2.55, 0.1, 0.1), timberMaterial('weathered'), new THREE.Vector3(0, 1.85, 4.0));
-  for (let i = -2; i <= 2; i++) addMesh(group, new THREE.TorusGeometry(0.14, 0.045, 5, 9, Math.PI * 1.65), new THREE.MeshStandardMaterial({ color: 0x7a3f2b, roughness: 1 }), new THREE.Vector3(i * 0.42, 1.46, 4.0));
+  for (let i = -2; i <= 2; i++) addMesh(group, new THREE.TorusGeometry(0.14, 0.045, 5, 9, Math.PI * 1.65), sharedBuildingDetailMaterial('paintRed'), new THREE.Vector3(i * 0.42, 1.46, 4.0));
   return group;
 }
 

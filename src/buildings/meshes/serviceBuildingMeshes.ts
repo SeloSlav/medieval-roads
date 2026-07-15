@@ -3,6 +3,7 @@ import {
   addMesh,
   metalMaterial,
   residenceFacadeMaterial,
+  sharedBuildingDetailMaterial,
   shingleMaterial,
   stoneMaterial,
   timberMaterial,
@@ -14,11 +15,7 @@ import {
   addSmallWindow,
 } from './buildingMeshKit.ts';
 
-const waterMaterial = new THREE.MeshStandardMaterial({
-  color: 0x315868,
-  roughness: 0.32,
-  metalness: 0.04,
-});
+const waterMaterial = sharedBuildingDetailMaterial('water');
 
 /** Limestone village well beneath a steep, weatherproof shingle cap. */
 export function createWellMesh(): THREE.Group {
@@ -147,7 +144,7 @@ function addDryingLeanTo(group: THREE.Group, halfW: number): void {
       addMesh(
         group,
         new THREE.ConeGeometry(0.14, 0.58, 7),
-        new THREE.MeshStandardMaterial({ color: 0x6e523e, roughness: 1, metalness: 0 }),
+        timberMaterial('mid'),
         new THREE.Vector3(x, 1.2, z),
         new THREE.Euler(Math.PI, 0, 0),
       );
@@ -199,12 +196,11 @@ function addHerbPorch(group: THREE.Group, frontZ: number): void {
     timberMaterial('weathered'),
     new THREE.Vector3(0, 1.72, porchZ),
   );
-  const herbs = [0x6d7846, 0x7d6b3f, 0x4f7048];
   for (let i = 0; i < 7; i++) {
     addMesh(
       group,
       new THREE.ConeGeometry(0.16, 0.55 + (i % 2) * 0.12, 7),
-      new THREE.MeshStandardMaterial({ color: herbs[i % herbs.length], roughness: 1, metalness: 0 }),
+      sharedBuildingDetailMaterial('foliage'),
       new THREE.Vector3(-1.55 + i * 0.52, 1.4, porchZ),
       new THREE.Euler(Math.PI, 0, 0),
     );
