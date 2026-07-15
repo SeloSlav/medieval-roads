@@ -10,6 +10,7 @@ const kinds: BackyardGardenKind[] = [
   'vegetable_garden',
   'flower_garden',
   'herb_garden',
+  'hen_yard',
 ];
 
 const signatures: Record<BackyardGardenKind, string> = {
@@ -18,6 +19,7 @@ const signatures: Record<BackyardGardenKind, string> = {
   vegetable_garden: 'BeanTrellis',
   flower_garden: 'RoseBush:',
   herb_garden: 'HerbDryingRack',
+  hen_yard: 'HenCoopDoor',
 };
 
 for (const kind of kinds) {

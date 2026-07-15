@@ -23,6 +23,7 @@ const tests = [
   'test:building-art',
   'test:camera-controller',
   'test:deer-wildlife',
+  'test:livestock',
 ] as const;
 
 let failed = 0;

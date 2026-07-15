@@ -60,6 +60,14 @@ const VISUAL_HEAD_CAP = 14;
 const MIN_EDGE_MARGIN = 0.12;
 const TAU = Math.PI * 2;
 
+export type CattleVisualKind = 'cow' | 'bull';
+
+/** Keeps cattle herds cow-heavy while adding one breeding bull once established. */
+export function createCattleVisualDistribution(headCount: number): CattleVisualKind[] {
+  const count = Math.max(0, Math.min(VISUAL_HEAD_CAP, Math.floor(headCount)));
+  return Array.from({ length: count }, (_, index) => count >= 4 && index === 0 ? 'bull' : 'cow');
+}
+
 /** Close-world, rigged animals for authoritative livestock herds. */
 export class LivestockVisuals {
   private readonly root = new THREE.Group();
@@ -176,9 +184,12 @@ export class LivestockVisuals {
       const pastures = pasturesByHerd.get(herd.buildingId);
       if (!pastures?.length || herd.headCount <= 0) continue;
       const visualCount = Math.min(VISUAL_HEAD_CAP, herd.headCount);
+      const cattleDistribution = herd.species === 'cattle'
+        ? createCattleVisualDistribution(visualCount)
+        : null;
       for (let index = 0; index < visualCount; index++) {
         const pasture = pastures[index % pastures.length]!;
-        const modelKind = resolveModelKind(herd.species, index, visualCount);
+        const modelKind = cattleDistribution?.[index] ?? resolveModelKind(herd.species);
         this.addAnimal(herd, pasture, index, modelKind);
       }
     }
@@ -290,13 +301,10 @@ function buildSignature(input: ReplayableLivestockInput): string {
 
 function resolveModelKind(
   species: LivestockSpecies,
-  index: number,
-  herdSize: number,
 ): keyof typeof MODEL_URLS {
   if (species === 'sheep') return 'sheep';
   if (species === 'swine') return 'swine';
-  // One breeding bull in established cattle herds; otherwise the herd is doe-heavy.
-  return herdSize >= 4 && index === 0 ? 'bull' : 'cow';
+  return 'cow';
 }
 
 function samplePasturePoint(pasture: PastureState, random: () => number): { x: number; z: number } {
