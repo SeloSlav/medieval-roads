@@ -9,13 +9,15 @@ import {
   tileMaterial,
   timberMaterial,
 } from '../buildingMaterials.ts';
+import {
+  createSeedThreeVineyardVines,
+  type VineyardVinePlacement,
+} from '../../vegetation/seedthree/vineyardVines.ts';
 import { addBarrel, addDarkOpening, addGableShell, addPlankDoor, addSmallWindow } from './buildingMeshKit.ts';
 
 const earth = sharedBuildingDetailMaterial('earth');
 const crop = sharedBuildingDetailMaterial('crop');
 const leaf = sharedBuildingDetailMaterial('foliage');
-const wineLeaf = sharedBuildingDetailMaterial('foliage');
-const grape = sharedBuildingDetailMaterial('paintBlue');
 const canvas = residenceFacadeMaterial('yellow');
 const copper = sharedBuildingDetailMaterial('brass');
 const hiveBlue = sharedBuildingDetailMaterial('paintBlue');
@@ -60,7 +62,7 @@ function addCross(group: THREE.Group, x: number, y: number, z: number, scale = 1
 export function createThreshingBarnMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Threshing barn';
-  const shell = addGableShell(group, { width: 10.8, depth: 7.2, stoneHeight: 0.58, wallHeight: 3.25, ridgeHeight: 3.0, wallMaterial: timberMaterial('weathered'), roofMaterial: tileMaterial(1) });
+  const shell = addGableShell(group, { width: 10.8, depth: 7.2, stoneHeight: 0.58, wallHeight: 3.25, ridgeHeight: 3.0, wallMaterial: timberMaterial('weathered'), roofMaterial: shingleMaterial() });
   addPlankDoor(group, -3.1, 0.62, shell.frontZ + 0.03, 1.25, 2.45);
   addPlankDoor(group, 0, 0.62, shell.frontZ + 0.03, 2.6, 2.7);
   addDarkOpening(group, 0, 0.66, -shell.frontZ - 0.03, 3.7, 2.85);
@@ -140,10 +142,15 @@ export function createGranaryMesh(): THREE.Group {
   addRaisedStore(group, 9.3, 6.1);
   const store = new THREE.Group();
   store.position.y = 1.2;
-  const shell = addGableShell(store, { width: 9.5, depth: 6.3, stoneHeight: 0.34, wallHeight: 3.15, ridgeHeight: 2.55, wallMaterial: timberMaterial('weathered'), roofMaterial: tileMaterial(1) });
+  const shell = addGableShell(store, { width: 9.5, depth: 6.3, stoneHeight: 0.34, wallHeight: 3.15, ridgeHeight: 2.55, wallMaterial: timberMaterial('weathered'), roofMaterial: shingleMaterial() });
   addPlankDoor(store, 0, 0.38, shell.frontZ + 0.03, 1.55, 2.25);
   for (const x of [-3.3, 3.3]) addSmallWindow(store, x, 1.92, shell.frontZ + 0.03, 0.58, 0.62);
   group.add(store);
+  // A projecting grain hoist gives the raised store a clear warehouse silhouette.
+  addMesh(group, new THREE.BoxGeometry(0.2, 1.95, 0.2), timberMaterial('dark'), new THREE.Vector3(0, 5.35, 3.2));
+  addMesh(group, new THREE.BoxGeometry(0.22, 0.22, 2.35), timberMaterial('weathered'), new THREE.Vector3(0, 6.25, 4.25), new THREE.Euler(-0.12, 0, 0));
+  addMesh(group, new THREE.CylinderGeometry(0.045, 0.045, 1.75, 6), metalMaterial('iron'), new THREE.Vector3(0, 5.25, 5.33));
+  addMesh(group, new THREE.TorusGeometry(0.18, 0.045, 6, 12), metalMaterial('iron'), new THREE.Vector3(0, 4.35, 5.33), new THREE.Euler(Math.PI * 0.5, 0, 0));
   for (let i = -4; i <= 4; i++) addMesh(group, new THREE.BoxGeometry(0.12, 1.15, 0.12), timberMaterial('dark'), new THREE.Vector3(i * 0.85, 0.58, 4.25), new THREE.Euler(0, 0, 0.08));
   for (let i = 0; i < 5; i++) addMesh(group, new THREE.BoxGeometry(1.55 - i * 0.1, 0.18, 0.46), stoneMaterial(i % 2 ? 'mid' : 'light'), new THREE.Vector3(0, 0.12 + i * 0.18, 3.55 + i * 0.34));
   addSack(group, -3.45, 3.8, 0.9);
@@ -196,7 +203,7 @@ export function createWatermillMesh(): THREE.Group {
 export function createCarpenterMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Carpenter and wheelwright';
-  const shell = addGableShell(group, { width: 7.2, depth: 5.6, stoneHeight: 0.7, wallHeight: 2.7, ridgeHeight: 2.2, wallMaterial: timberMaterial('weathered'), roofMaterial: tileMaterial(1) });
+  const shell = addGableShell(group, { width: 7.2, depth: 5.6, stoneHeight: 0.7, wallHeight: 2.7, ridgeHeight: 2.2, wallMaterial: timberMaterial('weathered'), roofMaterial: shingleMaterial() });
   addPlankDoor(group, -1.3, 0.74, shell.frontZ + 0.03, 0.95, 1.86);
   addSmallWindow(group, 1.4, 1.85, shell.frontZ + 0.03, 0.82, 0.94);
   addMesh(group, new THREE.BoxGeometry(3.4, 0.14, 5.0), shingleMaterial(), new THREE.Vector3(5.1, 2.65, 0), new THREE.Euler(0, 0, -0.16));
@@ -208,13 +215,17 @@ export function createCarpenterMesh(): THREE.Group {
   addMesh(group, new THREE.BoxGeometry(2.8, 0.22, 1.1), timberMaterial('weathered'), new THREE.Vector3(5.05, 0.92, -1.3));
   for (let i = 0; i < 5; i++) addMesh(group, new THREE.BoxGeometry(3.0 - i * 0.12, 0.16, 0.42), timberMaterial(i % 2 ? 'light' : 'mid'), new THREE.Vector3(4.75, 0.12 + i * 0.18, -3.2));
   addMesh(group, new THREE.CylinderGeometry(0.13, 0.13, 3.1, 8), timberMaterial('dark'), new THREE.Vector3(5.12, 0.76, 0), new THREE.Euler(0, 0, Math.PI * 0.5));
+  // Upright frame saw makes the open bay identifiable even before its props resolve.
+  for (const x of [4.15, 5.85]) addMesh(group, new THREE.BoxGeometry(0.16, 2.2, 0.16), timberMaterial('dark'), new THREE.Vector3(x, 1.2, -0.2));
+  addMesh(group, new THREE.BoxGeometry(2.05, 0.16, 0.16), timberMaterial('weathered'), new THREE.Vector3(5, 2.25, -0.2));
+  addMesh(group, new THREE.BoxGeometry(1.45, 0.05, 0.09), metalMaterial('steel'), new THREE.Vector3(5, 1.35, -0.2), new THREE.Euler(0, 0, -0.08));
   return group;
 }
 
 export function createFerryLandingMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Ferry landing';
-  const shell = addGableShell(group, { width: 5.2, depth: 4.2, stoneHeight: 0.42, wallHeight: 2.05, ridgeHeight: 1.75, wallMaterial: timberMaterial('weathered'), roofMaterial: tileMaterial(1), centerX: -3.5 });
+  const shell = addGableShell(group, { width: 5.2, depth: 4.2, stoneHeight: 0.42, wallHeight: 2.05, ridgeHeight: 1.75, wallMaterial: timberMaterial('weathered'), roofMaterial: shingleMaterial(), centerX: -3.5 });
   addPlankDoor(group, -3.5, 0.45, shell.frontZ + 0.03, 0.8, 1.62);
   addSmallWindow(group, -2.15, 1.42, shell.frontZ + 0.03, 0.58, 0.68);
   for (let z = 2.7; z <= 11.5; z += 1.2) {
@@ -235,17 +246,25 @@ export function createFerryLandingMesh(): THREE.Group {
 export function createVineyardMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Vineyard terrace';
+  const vinePlacements: VineyardVinePlacement[] = [];
   for (let terrace = 0; terrace < 5; terrace++) {
     const z = -4.8 + terrace * 2.25;
     addMesh(group, new THREE.BoxGeometry(14.5, 0.55, 1.55), earth, new THREE.Vector3(0, terrace * 0.22, z));
     addMesh(group, new THREE.BoxGeometry(14.5, 0.42, 0.22), stoneMaterial(terrace % 2 ? 'mid' : 'mortar'), new THREE.Vector3(0, terrace * 0.22 + 0.18, z + 0.82));
-    for (let x = -6.2; x <= 6.2; x += 1.55) {
+    for (let vine = 0; vine < 9; vine++) {
+      const x = -6.2 + vine * 1.55;
       addMesh(group, new THREE.BoxGeometry(0.1, 1.65, 0.1), timberMaterial('dark'), new THREE.Vector3(x, terrace * 0.22 + 0.95, z));
-      addMesh(group, new THREE.SphereGeometry(0.48, 7, 5), wineLeaf, new THREE.Vector3(x, terrace * 0.22 + 1.25, z), new THREE.Euler(), new THREE.Vector3(1.4, 0.65, 0.72));
-      if ((Math.round((x + 6.2) / 1.55) + terrace) % 2 === 0) addMesh(group, new THREE.SphereGeometry(0.17, 7, 5), grape, new THREE.Vector3(x + 0.24, terrace * 0.22 + 0.92, z + 0.22), new THREE.Euler(), new THREE.Vector3(0.72, 1.3, 0.72));
+      vinePlacements.push({
+        x,
+        y: terrace * 0.22 + 0.82,
+        z,
+        fruiting: (vine + terrace) % 2 === 0,
+        seed: terrace * 11 + vine,
+      });
     }
     addMesh(group, new THREE.CylinderGeometry(0.025, 0.025, 12.6, 5), metalMaterial('iron'), new THREE.Vector3(0, terrace * 0.22 + 1.08, z), new THREE.Euler(0, 0, Math.PI * 0.5));
   }
+  group.add(createSeedThreeVineyardVines(vinePlacements));
   const shell = addGableShell(group, { width: 4.3, depth: 3.6, stoneHeight: 0.65, wallHeight: 1.95, ridgeHeight: 1.55, wallMaterial: residenceFacadeMaterial('white'), roofMaterial: tileMaterial(0), centerX: -5.2, centerZ: 5.3 });
   addPlankDoor(group, -5.2, 0.68, shell.frontZ + 0.03, 0.76, 1.55);
   addMesh(group, new THREE.SphereGeometry(0.65, 7, 5), leaf, new THREE.Vector3(5.7, 1.0, 5.0));

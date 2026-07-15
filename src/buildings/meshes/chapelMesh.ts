@@ -6,7 +6,6 @@ import {
   sharedBuildingDetailMaterial,
   sharedBuildingMaterial,
   stoneMaterial,
-  tileMaterial,
   timberMaterial,
 } from '../buildingMaterials.ts';
 import { addTriangularGableWall } from '../meshPrimitives.ts';
@@ -24,7 +23,7 @@ type ChapelMaterials = {
 function createChapelMaterials(): ChapelMaterials {
   return {
     limewash: residenceFacadeMaterial('white'),
-    limewashShade: sharedBuildingMaterial('plasterGrey'),
+    limewashShade: sharedBuildingMaterial('masonryLight'),
     glass: sharedBuildingMaterial('glass'),
     brass: sharedBuildingDetailMaterial('brass'),
     redPaint: sharedBuildingDetailMaterial('paintRed'),
@@ -215,13 +214,14 @@ function addFolkFrieze(
   }
 }
 
-function addRoofTileBands(
+function addRoofBands(
   group: THREE.Group,
   halfWidth: number,
   depth: number,
   wallTop: number,
   ridgeHeight: number,
   roofPitch: number,
+  roofMaterial: THREE.Material,
 ): void {
   for (const side of [-1, 1] as const) {
     for (let row = 0; row < 6; row++) {
@@ -231,7 +231,7 @@ function addRoofTileBands(
       addMesh(
         group,
         new THREE.BoxGeometry(0.075, 0.065, depth + 0.5),
-        tileMaterial((row % 2) as 0 | 1),
+        roofMaterial,
         new THREE.Vector3(x, y + 0.025, 0),
         new THREE.Euler(0, 0, side * -roofPitch),
       );
@@ -244,10 +244,11 @@ function addBellTower(
   materials: ChapelMaterials,
   towerZ: number,
   roofY: number,
+  roofMaterial: THREE.Material,
 ): void {
   const baseSize = 1.62;
   const belfryFloorY = roofY + 0.18;
-  const belfryHeight = 1.72;
+  const belfryHeight = 2.08;
   const bellLift = 0.18;
 
   addMesh(
@@ -311,8 +312,8 @@ function addBellTower(
   const towerRoofY = belfryFloorY + belfryHeight + 0.63;
   addMesh(
     group,
-    new THREE.ConeGeometry(1.32, 1.25, 4),
-    tileMaterial(1),
+    new THREE.ConeGeometry(1.32, 1.48, 4),
+    roofMaterial,
     new THREE.Vector3(0, towerRoofY, towerZ),
     new THREE.Euler(0, Math.PI * 0.25, 0),
   );
@@ -339,6 +340,7 @@ export function createChapelMesh(): THREE.Group {
   const group = new THREE.Group();
   group.name = 'Chapel';
   const materials = createChapelMaterials();
+  const roofMaterial = sharedBuildingMaterial('slate');
 
   const width = 5.2;
   const depth = 6.9;
@@ -402,16 +404,16 @@ export function createChapelMesh(): THREE.Group {
     addMesh(
       group,
       new THREE.BoxGeometry(slopeLen, 0.15, depth + 0.48),
-      tileMaterial(side > 0 ? 0 : 1),
+      roofMaterial,
       new THREE.Vector3(side * halfW * 0.46, wallTop + ridgeHeight * 0.48, 0),
       new THREE.Euler(0, 0, side * -roofPitch),
     );
   }
-  addRoofTileBands(group, halfW, depth, wallTop, ridgeHeight, roofPitch);
+  addRoofBands(group, halfW, depth, wallTop, ridgeHeight, roofPitch, roofMaterial);
   addMesh(
     group,
     new THREE.BoxGeometry(0.28, 0.2, depth + 0.66),
-    tileMaterial(2),
+    roofMaterial,
     new THREE.Vector3(0, wallTop + ridgeHeight + 0.04, 0),
   );
 
@@ -438,7 +440,7 @@ export function createChapelMesh(): THREE.Group {
     }
   }
 
-  addBellTower(group, materials, 1.18, wallTop + ridgeHeight * 0.7);
+  addBellTower(group, materials, 1.18, wallTop + ridgeHeight * 0.7, roofMaterial);
 
   const frontGableZ = halfD + 0.12;
   addMesh(

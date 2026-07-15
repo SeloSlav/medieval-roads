@@ -48,6 +48,9 @@ for (const kind of BUILDING_KINDS) {
   if (!model.name) throw new Error(`${kind} must have a named, dedicated model.`);
   if (modelNames.has(model.name)) throw new Error(`${kind} reuses the model identity “${model.name}”.`);
   modelNames.add(model.name);
+  if (kind === 'vineyard' && !model.getObjectByName('SeedThree cultivated grapevine cards')) {
+    throw new Error('Vineyard must use the shared SeedThree instanced vine-card renderer.');
+  }
 
   let meshCount = 0;
   model.traverse((object) => {

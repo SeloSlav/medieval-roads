@@ -48,6 +48,10 @@ import {
   disposeBuildingMaterialLibrary,
   initializeBuildingMaterialLibrary,
 } from '../buildings/buildingMaterials.ts';
+import {
+  disposeVineyardVineResources,
+  initializeVineyardVineResources,
+} from '../vegetation/seedthree/vineyardVines.ts';
 
 export type SceneLoadProgress = {
   label: string;
@@ -209,6 +213,7 @@ export class SceneManager {
       initializeBuildingMaterialLibrary(8),
     ]);
     applyMaxAnisotropy(startupTextures, backend.maxAnisotropy);
+    await initializeVineyardVineResources(backend.maxAnisotropy, backend.kind);
     container.appendChild(backend.renderer.domElement);
     onProgress?.({
       label: 'Loading graphics',
@@ -664,6 +669,7 @@ export class SceneManager {
     disposeObject3D(this.selectionGroup);
     this.terrain.dispose();
     this.materials.dispose();
+    disposeVineyardVineResources();
     disposeBuildingMaterialLibrary();
     this.renderer.dispose();
     this.renderer.domElement.remove();

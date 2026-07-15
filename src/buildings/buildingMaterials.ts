@@ -101,16 +101,16 @@ const MATERIAL_DEFINITIONS: Record<BuildingMaterialKey, MaterialDefinition> = {
   masonryLight: { color: 0xf0e9dc, roughness: 0.96, metalness: 0, textureFamily: 'masonry', normalScale: 0.72 },
   masonryMid: { color: 0xc5beb2, roughness: 0.97, metalness: 0, textureFamily: 'masonry', normalScale: 0.78 },
   masonryDark: { color: 0x858688, roughness: 0.98, metalness: 0, textureFamily: 'masonry', normalScale: 0.82 },
-  timberDark: { color: 0x72533d, roughness: 0.91, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.62 },
-  timberMid: { color: 0x987359, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.58 },
-  timberLight: { color: 0xb68f70, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.55 },
-  timberWeathered: { color: 0x9b856f, roughness: 0.94, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.68 },
+  timberDark: { color: 0x86664f, roughness: 0.91, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.62 },
+  timberMid: { color: 0xaa866b, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.58 },
+  timberLight: { color: 0xc2a184, roughness: 0.9, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.55 },
+  timberWeathered: { color: 0xae9a87, roughness: 0.94, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.68 },
   clayRed: { color: 0xffffff, roughness: 0.84, metalness: 0.01, textureFamily: 'clayTiles', normalScale: 0.74 },
   clayDark: { color: 0xc58f84, roughness: 0.88, metalness: 0.01, textureFamily: 'clayTiles', normalScale: 0.78 },
   shingle: { color: 0x806856, roughness: 0.95, metalness: 0, textureFamily: 'woodPlanks', normalScale: 0.72 },
   slate: { color: 0x737980, roughness: 0.91, metalness: 0.02, textureFamily: 'masonry', normalScale: 0.48 },
   metalIron: { color: 0x4a4846, roughness: 0.55, metalness: 0.72 },
-  glass: { color: 0x30444d, roughness: 0.36, metalness: 0.04 },
+  glass: { color: 0x3d4747, roughness: 0.4, metalness: 0.03 },
   moss: { color: GORSKI_PALETTE.moss, roughness: 0.98, metalness: 0 },
   grassRoof: { color: GORSKI_PALETTE.grassRoof, roughness: 0.99, metalness: 0 },
   interiorDark: { color: GORSKI_PALETTE.interiorDark, roughness: 1, metalness: 0 },
@@ -305,7 +305,7 @@ function applyDetailTextureSet(
 export function quarryRockMaterial(
   shade: keyof typeof QUARRY_ROCK_PALETTE = 'mid',
 ): THREE.MeshStandardMaterial {
-  if (shade === 'light') return sharedBuildingMaterial('masonryLight');
+  if (shade === 'light' || shade === 'cut' || shade === 'dust') return sharedBuildingMaterial('masonryLight');
   if (shade === 'dark' || shade === 'spoil') return sharedBuildingMaterial('masonryDark');
   return sharedBuildingMaterial('masonryMid');
 }

@@ -25,8 +25,8 @@ import { hashStringSeed } from '../utils/random.ts';
 
 const WINDOW_GLOW_EMISSIVE = 0xffc060;
 const WINDOW_GLOW_COLOR = 0x4a3820;
-const WINDOW_DARK_EMISSIVE = 0x1a2530;
-const WINDOW_DARK_COLOR = 0x2a3540;
+const WINDOW_DARK_EMISSIVE = 0x18201f;
+const WINDOW_DARK_COLOR = 0x303a39;
 
 function createWindowMaterial(): THREE.MeshStandardMaterial {
   const material = sharedBuildingMaterial('glass').clone();
