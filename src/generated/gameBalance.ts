@@ -866,10 +866,10 @@ export type MarketCommodityOffer = {
 
 export const MARKET_COMMODITIES = [
   {"id":"buy_pork","label":"Smoked pork","origin":"Kvarner lowlands","description":"Salt-cured pork — staple provender for hungry households","foodAmount":8,"baseGoldCost":10},
-  {"id":"buy_lamb","label":"Gorski Kotar lamb","origin":"Mountain pastures","description":"Pastured lamb from the highland flocks — a regional specialty","foodAmount":6,"baseGoldCost":13},
+  {"id":"buy_lamb","label":"Highland lamb","origin":"Mountain pastures","description":"Pastured lamb from the highland flocks — a regional specialty","foodAmount":6,"baseGoldCost":13},
   {"id":"buy_veal","label":"Istrian veal","origin":"Coastal caravans","description":"Tender veal from Istrian herds — premium but nourishing","foodAmount":5,"baseGoldCost":15},
   {"id":"buy_kobasica","label":"Dried sausage","origin":"Lika smokehouses","description":"Smoked kobasica — keeps well on the road","foodAmount":4,"baseGoldCost":8},
-  {"id":"buy_cheese","label":"Mountain cheese","origin":"Gorski Kotar dairies","description":"Hard sheep's cheese from upland dairies","foodAmount":3,"baseGoldCost":7},
+  {"id":"buy_cheese","label":"Mountain cheese","origin":"Highland dairies","description":"Hard sheep's cheese from upland dairies","foodAmount":3,"baseGoldCost":7},
 ] as const satisfies readonly MarketCommodityOffer[];
 
 export type MarketCommodityId = (typeof MARKET_COMMODITIES)[number]['id'];
@@ -885,7 +885,7 @@ export type MarketWaterCommodityOffer = {
 
 export const MARKET_WATER_COMMODITIES = [
   {"id":"buy_water_cask","label":"Water cask","origin":"Plitvice springs","description":"Oak casks of spring water from the karst highlands","waterAmount":6,"baseGoldCost":5},
-  {"id":"buy_water_barrel","label":"Spring water barrel","origin":"Gorski Kotar wells","description":"Barrelled well water hauled by mule train","waterAmount":10,"baseGoldCost":8},
+  {"id":"buy_water_barrel","label":"Spring water barrel","origin":"Highland wells","description":"Barrelled well water hauled by mule train","waterAmount":10,"baseGoldCost":8},
 ] as const satisfies readonly MarketWaterCommodityOffer[];
 
 export type MarketWaterCommodityId = (typeof MARKET_WATER_COMMODITIES)[number]['id'];

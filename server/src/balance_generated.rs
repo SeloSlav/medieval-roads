@@ -1269,7 +1269,7 @@ const COMMODITY_BUY_PORK: MarketCommodityOffer = MarketCommodityOffer {
 
 const COMMODITY_BUY_LAMB: MarketCommodityOffer = MarketCommodityOffer {
     id: "buy_lamb",
-    label: "Gorski Kotar lamb",
+    label: "Highland lamb",
     origin: "Mountain pastures",
     description: "Pastured lamb from the highland flocks — a regional specialty",
     food_amount: 6.0,
@@ -1297,7 +1297,7 @@ const COMMODITY_BUY_KOBASICA: MarketCommodityOffer = MarketCommodityOffer {
 const COMMODITY_BUY_CHEESE: MarketCommodityOffer = MarketCommodityOffer {
     id: "buy_cheese",
     label: "Mountain cheese",
-    origin: "Gorski Kotar dairies",
+    origin: "Highland dairies",
     description: "Hard sheep's cheese from upland dairies",
     food_amount: 3.0,
     base_gold_cost: 7.0,
@@ -1335,7 +1335,7 @@ const WATER_COMMODITY_BUY_WATER_CASK: MarketWaterCommodityOffer = MarketWaterCom
 const WATER_COMMODITY_BUY_WATER_BARREL: MarketWaterCommodityOffer = MarketWaterCommodityOffer {
     id: "buy_water_barrel",
     label: "Spring water barrel",
-    origin: "Gorski Kotar wells",
+    origin: "Highland wells",
     description: "Barrelled well water hauled by mule train",
     water_amount: 10.0,
     base_gold_cost: 8.0,

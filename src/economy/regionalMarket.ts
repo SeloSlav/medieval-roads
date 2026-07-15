@@ -30,7 +30,7 @@ export const DEFAULT_REGIONAL_MARKET_STATE: RegionalMarketState = {
   foodPriceMult: 1,
   regionalFoodDemand: 0.5,
   regionalFoodSupply: 0.5,
-  bulletin: 'Caravans from Kvarner and Gorski Kotar report steady trade.',
+  bulletin: 'Caravans from Kvarner and the nearby highlands report steady trade.',
 };
 
 export function priceMultiplierFor(

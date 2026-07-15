@@ -34,7 +34,7 @@ const BUILD_CARD_ART: Record<PlacementArtKey, string> = {
 };
 
 const DETAILS: Record<PlacementArtKey, [title: string, hotkey: string, description: string]> = {
-  residences: ['Residence', 'H', 'Lay out Croatian Gorski Kotar homesteads along a road; homes can grow through three distinct tiers.'],
+  residences: ['Residence', 'H', 'Lay out homesteads along a road; homes can grow through three distinct tiers.'],
   well: ['Well', 'E', 'Draws groundwater and dispatches it to road-linked homes.'],
   chapel: ['Chapel', 'C', 'A staffed parish chapel collects tithes and supports nearby households.'],
   monastery: ['Pauline monastery', 'O', 'An autonomous hillside monastery offering charity, pilgrimages, feasts, and wider faith coverage.'],

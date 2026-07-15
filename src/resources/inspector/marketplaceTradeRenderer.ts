@@ -94,7 +94,7 @@ export function renderMarketplaceTradePanel(
       <p class="marketplace-trade-intro">Trade with caravans from neighboring regions. Provender and water orders are hauled by cart to road-linked homes. Households with savings auto-order when food or water runs low.</p>
       <p class="marketplace-trade-stock">${formatTradeAvailabilitySummary(availability)}</p>
       <section class="marketplace-trade-section" aria-label="Provender">
-        <h3 class="marketplace-trade-section__title">Provender — Gorski Kotar market</h3>
+        <h3 class="marketplace-trade-section__title">Provender — regional market</h3>
         <ul class="marketplace-trade-list">${MARKET_COMMODITIES.map(renderFoodCommodity).join('')}</ul>
       </section>
       <section class="marketplace-trade-section" aria-label="Water imports">

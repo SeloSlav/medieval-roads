@@ -174,7 +174,7 @@ fn compose_bulletin(state: &MarketState) -> String {
     if state.regional_firewood_demand >= 0.72 {
         return "Cold snaps inland are driving firewood demand.".to_string();
     }
-    "Caravans from Kvarner and Gorski Kotar report steady trade.".to_string()
+    "Caravans from Kvarner and the nearby highlands report steady trade.".to_string()
 }
 
 fn hash_identity(owner: Identity) -> u64 {

@@ -85,7 +85,7 @@
     },
     {
       "id": "buy_lamb",
-      "label": "Gorski Kotar lamb",
+      "label": "Highland lamb",
       "origin": "Mountain pastures",
       "description": "Pastured lamb from the highland flocks — a regional specialty",
       "foodAmount": 6,
@@ -110,7 +110,7 @@
     {
       "id": "buy_cheese",
       "label": "Mountain cheese",
-      "origin": "Gorski Kotar dairies",
+      "origin": "Highland dairies",
       "description": "Hard sheep's cheese from upland dairies",
       "foodAmount": 3,
       "baseGoldCost": 7
@@ -128,7 +128,7 @@
     {
       "id": "buy_water_barrel",
       "label": "Spring water barrel",
-      "origin": "Gorski Kotar wells",
+      "origin": "Highland wells",
       "description": "Barrelled well water hauled by mule train",
       "waterAmount": 10,
       "baseGoldCost": 8
