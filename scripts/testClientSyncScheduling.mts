@@ -262,7 +262,7 @@ function testTreeVisualSyncSkipsUnchangedSnapshots(): void {
   const applier = new SpacetimeSnapshotApplier();
   applier.apply(deps as never, first, null);
   assert.equal(syncAllCalls, 1);
-  assert.equal(buildingSyncCalls, 1);
+  assert.equal(buildingSyncCalls, 0);
   assert.equal(fenceSyncCalls, 1);
   assert.equal(forestClearanceCalls, 1);
 
@@ -270,7 +270,7 @@ function testTreeVisualSyncSkipsUnchangedSnapshots(): void {
   applier.apply(deps as never, tickOnly, first);
   assert.equal(syncAllCalls, 1);
   assert.equal(syncTreeCalls, 0);
-  assert.equal(buildingSyncCalls, 1);
+  assert.equal(buildingSyncCalls, 0);
   assert.equal(fenceSyncCalls, 1);
   assert.equal(forestClearanceCalls, 1);
 
@@ -312,7 +312,7 @@ function testTreeVisualSyncSkipsUnchangedSnapshots(): void {
   });
   const buildingAdded = { ...treeChanged, tick: 3, buildings: changedBuildings };
   applier.apply(deps as never, buildingAdded, treeChanged);
-  assert.equal(buildingSyncCalls, 2);
+  assert.equal(buildingSyncCalls, 1);
 
   const laborChanged = new Map(buildingAdded.buildings);
   laborChanged.set('building-1', {
@@ -326,7 +326,7 @@ function testTreeVisualSyncSkipsUnchangedSnapshots(): void {
   );
   assert.equal(
     buildingSyncCalls,
-    2,
+    1,
     'labor-only updates should not rebuild building geometry or terrain pads',
   );
 }

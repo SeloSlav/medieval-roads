@@ -139,6 +139,9 @@ mod tests {
             water_capacity: 0.0,
             assigned_labor: 1,
             gold,
+            storehouse_accepts_timber: true,
+            storehouse_accepts_stone: true,
+            storehouse_accepts_firewood: true,
         }
     }
 

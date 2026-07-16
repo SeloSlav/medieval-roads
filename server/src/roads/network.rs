@@ -4,7 +4,7 @@ use serde::Deserialize;
 use spacetimedb::Identity;
 use spacetimedb::ReducerContext;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 
 use crate::constants::BUILDING_ROAD_ACCESS_DISTANCE;
 use crate::db::*;
@@ -40,8 +40,11 @@ struct RoadSnapshot {
 #[derive(Debug, Clone)]
 pub struct RoadNetwork {
     nodes: HashMap<String, (f64, f64)>,
-    adjacency: HashMap<String, Vec<String>>,
     edges: Vec<RoadEdgeRow>,
+    weighted_graph: HashMap<String, Vec<(String, f64)>>,
+    component_by_node: HashMap<String, u32>,
+    edge_lookup: HashMap<String, HashMap<String, (usize, bool)>>,
+    endpoint_half_width: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +70,10 @@ impl RoadNetwork {
         }
 
         let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
-        for edge in &snapshot.edges {
+        let mut weighted_graph: HashMap<String, Vec<(String, f64)>> = HashMap::new();
+        let mut edge_lookup: HashMap<String, HashMap<String, (usize, bool)>> = HashMap::new();
+        let mut endpoint_half_width: HashMap<String, f64> = HashMap::new();
+        for (index, edge) in snapshot.edges.iter().enumerate() {
             if edge.start_node_id.is_empty() || edge.end_node_id.is_empty() {
                 continue;
             }
@@ -79,12 +85,44 @@ impl RoadNetwork {
                 .entry(edge.end_node_id.clone())
                 .or_default()
                 .push(edge.start_node_id.clone());
+            let weight = polyline_length(&edge.sampled_path);
+            weighted_graph
+                .entry(edge.start_node_id.clone())
+                .or_default()
+                .push((edge.end_node_id.clone(), weight));
+            weighted_graph
+                .entry(edge.end_node_id.clone())
+                .or_default()
+                .push((edge.start_node_id.clone(), weight));
+            edge_lookup
+                .entry(edge.start_node_id.clone())
+                .or_default()
+                .entry(edge.end_node_id.clone())
+                .or_insert((index, false));
+            edge_lookup
+                .entry(edge.end_node_id.clone())
+                .or_default()
+                .entry(edge.start_node_id.clone())
+                .or_insert((index, true));
+            let half_width = edge.width * 0.5;
+            endpoint_half_width
+                .entry(edge.start_node_id.clone())
+                .and_modify(|width| *width = width.max(half_width))
+                .or_insert(half_width);
+            endpoint_half_width
+                .entry(edge.end_node_id.clone())
+                .and_modify(|width| *width = width.max(half_width))
+                .or_insert(half_width);
         }
+        let component_by_node = build_component_ids(&nodes, &adjacency);
 
         Some(Self {
             nodes,
-            adjacency,
             edges: snapshot.edges,
+            weighted_graph,
+            component_by_node,
+            edge_lookup,
+            endpoint_half_width,
         })
     }
 
@@ -110,12 +148,7 @@ impl RoadNetwork {
         }
 
         for (node_id, &(nx, nz)) in &self.nodes {
-            let mut max_half_width = 0.0_f64;
-            for edge in &self.edges {
-                if edge.start_node_id == *node_id || edge.end_node_id == *node_id {
-                    max_half_width = max_half_width.max(edge.width * 0.5);
-                }
-            }
+            let max_half_width = self.endpoint_half_width.get(node_id).copied().unwrap_or(0.0);
             if max_half_width > 0.0 && distance(x, z, nx, nz) <= max_half_width + ROAD_SURFACE_MARGIN {
                 return true;
             }
@@ -136,7 +169,8 @@ impl RoadNetwork {
 
     /// Shortest travel distance along the road graph, including off-road access legs.
     pub fn road_path_distance(&self, ax: f64, az: f64, bx: f64, bz: f64) -> Option<f64> {
-        self.road_path_route(ax, az, bx, bz).map(|route| route.distance)
+        let solve = self.shortest_path_solve(ax, az, bx, bz)?;
+        Some(self.route_distance(ax, az, bx, bz, &solve.node_path))
     }
 
     /// Canonical shortest route — distance matches sampled polyline length for movement.
@@ -162,7 +196,6 @@ impl RoadNetwork {
             return None;
         }
 
-        let graph = self.build_weighted_graph();
         let mut dist: HashMap<String, f64> = HashMap::new();
         let mut prev: HashMap<String, Option<String>> = HashMap::new();
         let mut heap: BinaryHeap<Reverse<(u64, String)>> = BinaryHeap::new();
@@ -185,7 +218,7 @@ impl RoadNetwork {
                 continue;
             }
             let cost = best;
-            for (neighbor, weight) in graph.get(&node_id).into_iter().flatten() {
+            for (neighbor, weight) in self.weighted_graph.get(&node_id).into_iter().flatten() {
                 let next = cost + weight;
                 let entry = dist.entry(neighbor.clone()).or_insert(f64::INFINITY);
                 if next + 1e-6 < *entry {
@@ -228,25 +261,6 @@ impl RoadNetwork {
         Some(ShortestPathSolve { node_path })
     }
 
-    fn build_weighted_graph(&self) -> HashMap<String, Vec<(String, f64)>> {
-        let mut graph: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-        for edge in &self.edges {
-            if edge.start_node_id.is_empty() || edge.end_node_id.is_empty() {
-                continue;
-            }
-            let weight = polyline_length(&edge.sampled_path);
-            graph
-                .entry(edge.start_node_id.clone())
-                .or_default()
-                .push((edge.end_node_id.clone(), weight));
-            graph
-                .entry(edge.end_node_id.clone())
-                .or_default()
-                .push((edge.start_node_id.clone(), weight));
-        }
-        graph
-    }
-
     fn materialize_polyline(
         &self,
         ax: f64,
@@ -266,29 +280,66 @@ impl RoadNetwork {
     }
 
     fn edge_polyline_between(&self, from: &str, to: &str) -> Option<Vec<[f64; 2]>> {
-        for edge in &self.edges {
-            if edge.start_node_id == from && edge.end_node_id == to {
-                return Some(
-                    edge.sampled_path
-                        .iter()
-                        .map(|point| [point[0], point[2]])
-                        .collect(),
-                );
-            }
-            if edge.end_node_id == from && edge.start_node_id == to {
-                return Some(
-                    edge.sampled_path
-                        .iter()
-                        .rev()
-                        .map(|point| [point[0], point[2]])
-                        .collect(),
-                );
-            }
+        if let Some((edge, reverse)) = self.edge_between(from, to) {
+            let points: Vec<[f64; 2]> = if reverse {
+                edge.sampled_path
+                    .iter()
+                    .rev()
+                    .map(|point| [point[0], point[2]])
+                    .collect()
+            } else {
+                edge.sampled_path
+                    .iter()
+                    .map(|point| [point[0], point[2]])
+                    .collect()
+            };
+            return Some(points);
         }
 
         let (ax, az) = *self.nodes.get(from)?;
         let (bx, bz) = *self.nodes.get(to)?;
         Some(vec![[ax, az], [bx, bz]])
+    }
+
+    fn route_distance(
+        &self,
+        ax: f64,
+        az: f64,
+        bx: f64,
+        bz: f64,
+        node_path: &[String],
+    ) -> f64 {
+        let mut previous = (ax, az);
+        let mut total = 0.0;
+        for window in node_path.windows(2) {
+            if let Some((edge, reverse)) = self.edge_between(&window[0], &window[1]) {
+                if reverse {
+                    for point in edge.sampled_path.iter().rev() {
+                        let next = (point[0], point[2]);
+                        total += distance(previous.0, previous.1, next.0, next.1);
+                        previous = next;
+                    }
+                } else {
+                    for point in &edge.sampled_path {
+                        let next = (point[0], point[2]);
+                        total += distance(previous.0, previous.1, next.0, next.1);
+                        previous = next;
+                    }
+                }
+            } else if let Some(&(x, z)) = self.nodes.get(&window[1]) {
+                total += distance(previous.0, previous.1, x, z);
+                previous = (x, z);
+            }
+        }
+        total + distance(previous.0, previous.1, bx, bz)
+    }
+
+    fn edge_between(&self, from: &str, to: &str) -> Option<(&RoadEdgeRow, bool)> {
+        let &(index, reverse) = self
+            .edge_lookup
+            .get(from)
+            .and_then(|neighbors| neighbors.get(to))?;
+        Some((self.edges.get(index)?, reverse))
     }
 
     /// Polyline length in meters (XZ plane).
@@ -387,32 +438,46 @@ impl RoadNetwork {
     }
 
     fn share_component(&self, start_nodes: &[String], target_nodes: &[String]) -> bool {
-        let target_set: HashSet<&str> = target_nodes.iter().map(String::as_str).collect();
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
+        start_nodes.iter().any(|start| {
+            let Some(component) = self.component_by_node.get(start) else {
+                return false;
+            };
+            target_nodes
+                .iter()
+                .any(|target| self.component_by_node.get(target) == Some(component))
+        })
+    }
+}
 
-        for node in start_nodes {
-            queue.push_back(node.clone());
+fn build_component_ids(
+    nodes: &HashMap<String, (f64, f64)>,
+    adjacency: &HashMap<String, Vec<String>>,
+) -> HashMap<String, u32> {
+    let mut component_by_node = HashMap::new();
+    let mut next_component = 0_u32;
+    for node in nodes.keys().chain(adjacency.keys()) {
+        if component_by_node.contains_key(node) {
+            continue;
         }
-
-        while let Some(node) = queue.pop_front() {
-            if !visited.insert(node.clone()) {
+        let mut queue = VecDeque::from([node.clone()]);
+        while let Some(current) = queue.pop_front() {
+            if component_by_node
+                .insert(current.clone(), next_component)
+                .is_some()
+            {
                 continue;
             }
-            if target_set.contains(node.as_str()) {
-                return true;
-            }
-            if let Some(neighbors) = self.adjacency.get(&node) {
+            if let Some(neighbors) = adjacency.get(&current) {
                 for neighbor in neighbors {
-                    if !visited.contains(neighbor) {
+                    if !component_by_node.contains_key(neighbor) {
                         queue.push_back(neighbor.clone());
                     }
                 }
             }
         }
-
-        false
+        next_component = next_component.saturating_add(1);
     }
+    component_by_node
 }
 
 fn cost_to_key(cost: f64) -> u64 {
@@ -499,5 +564,54 @@ fn append_point(path: &mut Vec<[f64; 2]>, x: f64, z: f64) {
 fn append_polyline(path: &mut Vec<[f64; 2]>, segment: &[[f64; 2]]) {
     for point in segment {
         append_point(path, point[0], point[1]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RoadNetwork;
+
+    #[test]
+    fn precomputed_graph_preserves_routes_and_components() {
+        let network = RoadNetwork::from_snapshot_json(
+            r#"{
+                "nodes": [
+                    {"id":"a","position":[0.0,0.0,0.0]},
+                    {"id":"b","position":[10.0,0.0,0.0]},
+                    {"id":"c","position":[20.0,0.0,0.0]},
+                    {"id":"d","position":[100.0,0.0,0.0]},
+                    {"id":"e","position":[110.0,0.0,0.0]}
+                ],
+                "edges": [
+                    {
+                        "startNodeId":"a",
+                        "endNodeId":"b",
+                        "width":4.0,
+                        "sampledPath":[[0.0,0.0,0.0],[10.0,0.0,0.0]]
+                    },
+                    {
+                        "startNodeId":"b",
+                        "endNodeId":"c",
+                        "width":4.0,
+                        "sampledPath":[[10.0,0.0,0.0],[20.0,0.0,0.0]]
+                    },
+                    {
+                        "startNodeId":"d",
+                        "endNodeId":"e",
+                        "width":6.0,
+                        "sampledPath":[[100.0,0.0,0.0],[110.0,0.0,0.0]]
+                    }
+                ]
+            }"#,
+        )
+        .expect("road network should parse");
+
+        assert_eq!(network.weighted_graph.get("b").map(Vec::len), Some(2));
+        assert_eq!(network.component_by_node.get("a"), network.component_by_node.get("c"));
+        assert_ne!(network.component_by_node.get("a"), network.component_by_node.get("d"));
+        assert!(network.road_connected(0.0, 0.0, 20.0, 0.0));
+        assert!(!network.road_connected(0.0, 0.0, 100.0, 0.0));
+        assert!((network.road_path_distance(0.0, 0.0, 20.0, 0.0).unwrap() - 20.0).abs() < 1e-9);
+        assert!(network.is_on_road_surface(100.0, 2.9));
     }
 }
