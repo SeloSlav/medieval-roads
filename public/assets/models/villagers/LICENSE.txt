@@ -1,0 +1,27 @@
+Villager model assets
+=====================
+
+The GLB files in this directory are Quaternius models distributed under
+Creative Commons Zero v1.0 Universal (CC0 1.0):
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Assets and source pages:
+
+- quaternius-villager-man.glb
+  "Man" by Quaternius, from the Animated Men Pack
+  https://poly.pizza/m/fjHyMd5Wxw
+  https://poly.pizza/bundle/Animated-Men-Pack-DAC9SDgMQT
+  Downloaded GLB:
+  https://static.poly.pizza/985eacbf-9dde-44b7-9270-4e35c8400b13.glb
+
+- quaternius-villager-woman.glb
+  "Woman in Dress" by Quaternius, from the Animated Women Pack
+  https://poly.pizza/m/zMyPlQXBzq
+  https://poly.pizza/bundle/Animated-Women-Pack-HHSKxnk1mY
+  Downloaded GLB:
+  https://static.poly.pizza/a642af96-e239-4c5f-b50d-7661ff51deec.glb
+
+Both models retain their authored rigs and idle/walk animation clips. The game
+scales them to settlement proportions and applies deterministic clothing, skin,
+and hair colors at runtime. Attribution is not required by CC0, but this record
+is kept with the assets so their provenance and reuse terms remain auditable.

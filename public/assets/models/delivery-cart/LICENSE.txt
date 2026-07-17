@@ -1,0 +1,19 @@
+Delivery cart model asset
+=========================
+
+quaternius-medieval-cart.glb is "Cart" by Quaternius, distributed under
+Creative Commons Zero v1.0 Universal (CC0 1.0):
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Source model:
+https://poly.pizza/m/l7bDe7ak6j
+
+Collection:
+https://poly.pizza/bundle/Medieval-Village-Pack-NsHhjhlrfY
+
+Downloaded GLB:
+https://static.poly.pizza/94b32c91-4d46-4172-aadd-10176a4eb543.glb
+
+The game scales the cart, selects one of several deterministic canopy palettes,
+and adds its existing cargo-specific load geometry at runtime. Attribution is
+not required by CC0, but this record is kept with the asset for auditing.

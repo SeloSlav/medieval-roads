@@ -38,6 +38,7 @@
     "test:client-sync": "npx tsx scripts/testClientSyncScheduling.mts",
     "test:deer-wildlife": "npx tsx scripts/testDeerWildlife.mts",
     "test:livestock": "npx tsx scripts/testLivestock.mts",
+    "test:agent-visuals": "node --experimental-strip-types scripts/testAgentVisualAssets.mts",
     "test:civic-logistics": "npx tsx scripts/testCivicLogistics.mts",
     "test": "npm run test:ci",
     "test:ci": "npx tsx scripts/run-all-tests.mts",

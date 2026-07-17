@@ -1,11 +1,18 @@
 import * as THREE from 'three';
-import { disposeObject3D } from '../utils/dispose.ts';
 import type { DeliveryTripState, DeliveryTripPhase } from '../logistics/deliveryTrips.ts';
 import { decodeRoutePolyline } from '../logistics/routePolyline.ts';
-import { createDeliveryCartMesh } from '../logistics/deliveryCartMesh.ts';
+import {
+  createDeliveryCartMesh,
+  deliveryCartMeshName,
+  disposeDeliveryCartMesh,
+  disposeDeliveryCartModelSource,
+  loadDeliveryCartModelSource,
+  type DeliveryCartModelSource,
+} from '../logistics/deliveryCartMesh.ts';
 import type { Terrain } from '../terrain/Terrain.ts';
 import { samplePolylineXZ, type PointXZ } from '../utils/pathGeometry.ts';
 import { isWithinShadowRange, type CrowdViewState } from '../settlement/crowdView.ts';
+import { hashStringSeed } from '../utils/random.ts';
 
 const DISPLAY_BLEND_RATE = 14;
 
@@ -31,16 +38,22 @@ export class DeliveryAgentRenderer {
   private readonly terrain: Terrain;
   private readonly group = new THREE.Group();
   private readonly visuals = new Map<string, TripVisual>();
+  private latestTrips = new Map<string, DeliveryTripState>();
+  private cartSource: DeliveryCartModelSource | null = null;
+  private disposed = false;
 
   constructor(options: DeliveryAgentRendererOptions) {
     this.terrain = options.terrain;
     this.group.name = 'Delivery agents';
     options.parent.add(this.group);
+    void this.loadCartSource();
   }
 
   syncTrips(trips: Iterable<DeliveryTripState>): void {
+    const tripList = [...trips];
+    this.latestTrips = new Map(tripList.map((trip) => [trip.id, trip]));
     const nextIds = new Set<string>();
-    for (const trip of trips) {
+    for (const trip of tripList) {
       nextIds.add(trip.id);
       const polyline = decodeRoutePolyline(trip.routePolylineJson) ?? [];
       const pathDistance = trip.pathDistance > 1e-6
@@ -62,7 +75,7 @@ export class DeliveryAgentRenderer {
         continue;
       }
 
-      const mesh = createDeliveryCartMesh(trip.cargoKind);
+      const mesh = this.createCartMesh(trip);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       this.group.add(mesh);
@@ -117,7 +130,11 @@ export class DeliveryAgentRenderer {
       const y = this.terrain.getHeightAt(x, z) + 0.05;
       visual.mesh.position.set(x, y, z);
       visual.mesh.rotation.y = yaw;
-      visual.mesh.castShadow = isWithinShadowRange(x, z, view);
+      const castShadow = isWithinShadowRange(x, z, view);
+      visual.mesh.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh) mesh.castShadow = castShadow;
+      });
     }
   }
 
@@ -144,9 +161,13 @@ export class DeliveryAgentRenderer {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const id of [...this.visuals.keys()]) {
       this.removeTrip(id);
     }
+    if (this.cartSource) disposeDeliveryCartModelSource(this.cartSource);
+    this.cartSource = null;
+    this.latestTrips.clear();
     this.group.removeFromParent();
   }
 
@@ -170,13 +191,14 @@ export class DeliveryAgentRenderer {
   }
 
   private ensureCartMesh(visual: TripVisual, trip: DeliveryTripState): void {
-    if (visual.mesh.name === `DeliveryCart:${trip.cargoKind}`) return;
-    const replacement = createDeliveryCartMesh(trip.cargoKind);
+    const desiredName = deliveryCartMeshName(trip.cargoKind, this.cartSource != null);
+    if (visual.mesh.name === desiredName) return;
+    const replacement = this.createCartMesh(trip);
     replacement.position.copy(visual.mesh.position);
     replacement.rotation.copy(visual.mesh.rotation);
     replacement.castShadow = visual.mesh.castShadow;
     this.group.remove(visual.mesh);
-    disposeObject3D(visual.mesh);
+    disposeDeliveryCartMesh(visual.mesh);
     this.group.add(replacement);
     visual.mesh = replacement;
   }
@@ -184,8 +206,32 @@ export class DeliveryAgentRenderer {
   private removeTrip(id: string): void {
     const visual = this.visuals.get(id);
     if (!visual) return;
-    disposeObject3D(visual.mesh);
+    disposeDeliveryCartMesh(visual.mesh);
     visual.mesh.removeFromParent();
     this.visuals.delete(id);
+  }
+
+  private createCartMesh(trip: DeliveryTripState): THREE.Group {
+    return createDeliveryCartMesh(trip.cargoKind, {
+      appearanceSeed: hashStringSeed(`delivery-cart:${trip.id}`),
+      source: this.cartSource,
+    });
+  }
+
+  private async loadCartSource(): Promise<void> {
+    try {
+      const source = await loadDeliveryCartModelSource();
+      if (this.disposed) {
+        disposeDeliveryCartModelSource(source);
+        return;
+      }
+      this.cartSource = source;
+      for (const [id, trip] of this.latestTrips) {
+        const visual = this.visuals.get(id);
+        if (visual) this.ensureCartMesh(visual, trip);
+      }
+    } catch (error) {
+      console.warn('[Delivery carts] CC0 Quaternius cart failed to load.', error);
+    }
   }
 }

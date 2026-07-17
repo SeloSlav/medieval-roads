@@ -25,6 +25,7 @@ const tests = [
   'test:client-sync',
   'test:deer-wildlife',
   'test:livestock',
+  'test:agent-visuals',
   'test:civic-logistics',
 ] as const;
 

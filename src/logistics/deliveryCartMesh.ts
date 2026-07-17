@@ -1,7 +1,11 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { addMesh, timberMaterial } from '../buildings/buildingMaterials.ts';
 import type { DeliveryCargoKind } from './deliveryTrips.ts';
 import { cargoColor } from './deliveryTrips.ts';
+
+const MODEL_URL = '/assets/models/delivery-cart/quaternius-medieval-cart.glb';
+const MODEL_TARGET_HEIGHT = 1.56;
 
 const WHEEL_MATERIAL = new THREE.MeshStandardMaterial({
   color: 0x3a2d22,
@@ -10,6 +14,24 @@ const WHEEL_MATERIAL = new THREE.MeshStandardMaterial({
 });
 
 const CARGO_MATERIALS = new Map<DeliveryCargoKind, THREE.MeshStandardMaterial>();
+
+const CANOPY_PALETTES = [
+  { primary: 0x8a3228, cloth: 0xd8c9a6 },
+  { primary: 0x4a5c44, cloth: 0xd1c7a9 },
+  { primary: 0x3d4a62, cloth: 0xc8c0a9 },
+  { primary: 0x7a5e46, cloth: 0xd8c7a0 },
+] as const;
+
+export type DeliveryCartModelSource = {
+  scene: THREE.Group;
+  bounds: THREE.Box3;
+  sourceHeight: number;
+};
+
+export type DeliveryCartMeshOptions = {
+  appearanceSeed?: number;
+  source?: DeliveryCartModelSource | null;
+};
 
 function cargoMaterial(kind: DeliveryCargoKind): THREE.MeshStandardMaterial {
   let material = CARGO_MATERIALS.get(kind);
@@ -119,10 +141,127 @@ function addCargo(group: THREE.Group, kind: DeliveryCargoKind): void {
   }
 }
 
-export function createDeliveryCartMesh(kind: DeliveryCargoKind): THREE.Group {
-  const group = new THREE.Group();
-  group.name = `DeliveryCart:${kind}`;
+export function deliveryCartMeshName(
+  kind: DeliveryCargoKind,
+  hasModelSource: boolean,
+): string {
+  return `DeliveryCart:${kind}:${hasModelSource ? 'quaternius' : 'fallback'}`;
+}
 
+export function createDeliveryCartMesh(
+  kind: DeliveryCargoKind,
+  options: DeliveryCartMeshOptions = {},
+): THREE.Group {
+  const group = new THREE.Group();
+  const source = options.source ?? null;
+  group.name = deliveryCartMeshName(kind, source != null);
+  group.userData.deliveryCartAsset = source ? 'quaternius-medieval-cart' : 'procedural-fallback';
+
+  if (source) {
+    addQuaterniusCart(group, source, options.appearanceSeed ?? 0);
+  } else {
+    addProceduralCart(group);
+  }
+
+  const cargoRoot = new THREE.Group();
+  cargoRoot.name = `Cart cargo: ${kind}`;
+  if (source) {
+    cargoRoot.scale.setScalar(0.76);
+    cargoRoot.position.set(0, 0.08, 0.08);
+  }
+  addCargo(cargoRoot, kind);
+  group.add(cargoRoot);
+  return group;
+}
+
+export async function loadDeliveryCartModelSource(): Promise<DeliveryCartModelSource> {
+  const gltf = await new GLTFLoader().loadAsync(MODEL_URL);
+  const bounds = new THREE.Box3().setFromObject(gltf.scene);
+  const sourceHeight = bounds.max.y - bounds.min.y;
+  if (!Number.isFinite(sourceHeight) || sourceHeight <= 0.001) {
+    throw new Error(`Invalid delivery cart model bounds for ${MODEL_URL}`);
+  }
+  return { scene: gltf.scene, bounds, sourceHeight };
+}
+
+export function disposeDeliveryCartMesh(group: THREE.Group): void {
+  const ownedMaterials = new Set<THREE.Material>(
+    Array.isArray(group.userData.ownedCartMaterials)
+      ? group.userData.ownedCartMaterials as THREE.Material[]
+      : [],
+  );
+  group.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    mesh.geometry?.dispose();
+  });
+  for (const material of ownedMaterials) material.dispose();
+}
+
+export function disposeDeliveryCartModelSource(source: DeliveryCartModelSource): void {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
+  source.scene.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.geometry) geometries.add(mesh.geometry);
+    const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of meshMaterials) {
+      if (!material) continue;
+      materials.add(material);
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value);
+      }
+    }
+  });
+  for (const texture of textures) texture.dispose();
+  for (const material of materials) material.dispose();
+  for (const geometry of geometries) geometry.dispose();
+}
+
+function addQuaterniusCart(
+  group: THREE.Group,
+  source: DeliveryCartModelSource,
+  appearanceSeed: number,
+): void {
+  const model = source.scene.clone(true);
+  model.name = 'Quaternius medieval canopy cart';
+  const palette = CANOPY_PALETTES[
+    Math.abs(appearanceSeed) % CANOPY_PALETTES.length
+  ] ?? CANOPY_PALETTES[0];
+  const ownedMaterials: THREE.Material[] = [];
+
+  model.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry = mesh.geometry.clone();
+    const sourceMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const materials = sourceMaterials.map((material) => {
+      const clone = material.clone();
+      const standard = clone as THREE.MeshStandardMaterial;
+      const materialName = material.name.toLowerCase();
+      if (standard.color && materialName === 'red') standard.color.setHex(palette.primary);
+      if (standard.color && materialName === 'beige') standard.color.setHex(palette.cloth);
+      if (standard.color) {
+        standard.roughness = 0.9;
+        standard.metalness = materialName.includes('stone') ? 0.08 : 0;
+      }
+      ownedMaterials.push(clone);
+      return clone;
+    });
+    mesh.material = Array.isArray(mesh.material) ? materials : materials[0]!;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
+  });
+
+  const scale = MODEL_TARGET_HEIGHT / source.sourceHeight;
+  model.scale.setScalar(scale);
+  model.position.y = -source.bounds.min.y * scale + 0.01;
+  group.userData.ownedCartMaterials = ownedMaterials;
+  group.add(model);
+}
+
+function addProceduralCart(group: THREE.Group): void {
   const frame = timberMaterial('mid');
   addMesh(group, new THREE.BoxGeometry(1.15, 0.14, 0.72), frame, new THREE.Vector3(0, 0.42, 0));
   addMesh(group, new THREE.BoxGeometry(0.12, 0.55, 0.72), frame, new THREE.Vector3(-0.48, 0.68, 0));
@@ -138,26 +277,23 @@ export function createDeliveryCartMesh(kind: DeliveryCargoKind): THREE.Group {
   );
   addMesh(
     group,
-    wheelGeometry,
+    wheelGeometry.clone(),
     WHEEL_MATERIAL,
     new THREE.Vector3(-0.42, 0.22, -0.34),
     new THREE.Euler(Math.PI * 0.5, 0, 0),
   );
   addMesh(
     group,
-    wheelGeometry,
+    wheelGeometry.clone(),
     WHEEL_MATERIAL,
     new THREE.Vector3(0.42, 0.22, 0.34),
     new THREE.Euler(Math.PI * 0.5, 0, 0),
   );
   addMesh(
     group,
-    wheelGeometry,
+    wheelGeometry.clone(),
     WHEEL_MATERIAL,
     new THREE.Vector3(0.42, 0.22, -0.34),
     new THREE.Euler(Math.PI * 0.5, 0, 0),
   );
-
-  addCargo(group, kind);
-  return group;
 }

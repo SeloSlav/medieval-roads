@@ -7,7 +7,11 @@ import {
   isWithinCrowdView,
   type CrowdViewState,
 } from './crowdView.ts';
-import { SettlementCrowdRenderer, type CrowdRenderAgent } from './SettlementCrowdRenderer.ts';
+import {
+  SettlementCrowdRenderer,
+  type CrowdRenderAgent,
+  type VillagerModelVariant,
+} from './SettlementCrowdRenderer.ts';
 import {
   computeVillagerSlots,
   findNearestRoadEdgePath,
@@ -15,6 +19,8 @@ import {
   pickIdleOffset,
   pickVillagerAppearanceSeed,
   pickVillagerColors,
+  pickVillagerHairColor,
+  pickVillagerModelVariant,
   pickVillagerWalkPath,
   pickWalkSpeed,
   residenceDoorPosition,
@@ -35,8 +41,10 @@ type VillagerAgent = {
   idleRemaining: number;
   walkSpeed: number;
   appearanceSeed: number;
+  modelVariant: VillagerModelVariant;
   tunicColor: number;
   skinColor: number;
+  hairColor: number;
   idleOffset: { x: number; z: number; yaw: number };
   pathSeed: number;
   idleDirty: boolean;
@@ -109,8 +117,10 @@ export class VillagerRenderer {
             idleRemaining: pickIdleDuration(appearanceSeed),
             walkSpeed: pickWalkSpeed(appearanceSeed),
             appearanceSeed,
+            modelVariant: pickVillagerModelVariant(appearanceSeed),
             tunicColor: colors.tunic,
             skinColor: colors.skin,
+            hairColor: pickVillagerHairColor(appearanceSeed),
             idleOffset: pickIdleOffset(residenceId, slotIndex),
             pathSeed: appearanceSeed ^ 0x85ebca6b,
             idleDirty: true,
@@ -172,7 +182,7 @@ export class VillagerRenderer {
       agent.y = this.resolveGroundY(agent.x, agent.z) + 0.02;
     }
 
-    this.pushRenderState(view);
+    this.pushRenderState(view, dt);
   }
 
   dispose(): void {
@@ -180,24 +190,29 @@ export class VillagerRenderer {
     this.renderer.dispose();
   }
 
-  private pushRenderState(view?: CrowdViewState): void {
+  private pushRenderState(view?: CrowdViewState, dt = 0): void {
     const renderAgents: CrowdRenderAgent[] = [];
     let slot = 0;
     for (const agent of this.agents.values()) {
       const residence = this.residences.get(agent.residenceId);
       if (!residence || residence.abandoned || residence.population <= 0) continue;
       renderAgents.push({
+        id: agent.id,
         slot: slot++,
         x: agent.x,
         y: agent.y,
         z: agent.z,
         yaw: agent.yaw,
+        appearanceSeed: agent.appearanceSeed,
+        variant: agent.modelVariant,
+        mode: agent.mode,
         tunicColor: agent.tunicColor,
         skinColor: agent.skinColor,
+        hairColor: agent.hairColor,
         active: true,
       });
     }
-    this.renderer.syncAgents(renderAgents, view ?? this.lastView);
+    this.renderer.syncAgents(renderAgents, view ?? this.lastView, dt);
   }
 
   private simStep(agent: VillagerAgent, residence: ResidenceState, dt: number): void {

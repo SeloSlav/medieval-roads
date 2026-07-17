@@ -9,6 +9,7 @@ import {
   type PointXZ,
 } from '../utils/pathGeometry.ts';
 import { hashStringSeed, mulberry32 } from '../utils/random.ts';
+import type { VillagerModelVariant } from './SettlementCrowdRenderer.ts';
 
 export type { PointXZ as RoadPoint };
 
@@ -178,4 +179,16 @@ export function pickVillagerColors(seed: number): { tunic: number; skin: number 
   const tunic = tunics[Math.floor(rng() * tunics.length)] ?? tunics[0];
   const skin = skins[Math.floor(rng() * skins.length)] ?? skins[0];
   return { tunic, skin };
+}
+
+/** Stable presentation gender so replicated villagers never flicker between models. */
+export function pickVillagerModelVariant(seed: number): VillagerModelVariant {
+  const rng = mulberry32(seed ^ 0x9e3779b9);
+  return rng() < 0.5 ? 'man' : 'woman';
+}
+
+export function pickVillagerHairColor(seed: number): number {
+  const rng = mulberry32(seed ^ 0x6c8e9cf5);
+  const hair = [0x2f2119, 0x4a3022, 0x6b4b2d, 0x8a713e, 0x3b302b] as const;
+  return hair[Math.floor(rng() * hair.length)] ?? hair[0];
 }
