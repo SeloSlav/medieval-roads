@@ -4,6 +4,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import {
+  DELIVERY_CARGO_KINDS,
+  type DeliveryCargoKind,
+} from '../src/logistics/deliveryTrips.ts';
+import {
   createDeliveryCartMesh,
   deliveryCartMeshName,
   disposeDeliveryCartMesh,
@@ -138,6 +142,46 @@ assert.notEqual(
   cartB.getObjectByName('Cart cargo: water'),
   undefined,
   'all delivery kinds should preserve their readable load',
+);
+
+const cargoSignatures: Record<DeliveryCargoKind, string> = {
+  firewood: 'Firewood split log 1',
+  water: 'Water barrel',
+  food: 'Fresh food basket',
+  timber: 'Timber pole 1',
+  grain: 'Grain sack',
+  flour: 'Flour sack',
+  ale: 'Ale keg',
+  preservedFood: 'Preserved food crock 1',
+  honey: 'Honey crock 1',
+  wine: 'Wine amphora',
+  stone: 'Quarried stone 1',
+};
+for (const [index, kind] of DELIVERY_CARGO_KINDS.entries()) {
+  const cart = createDeliveryCartMesh(kind, {
+    appearanceSeed: 100 + index,
+    source: cartSource,
+  });
+  const signature = cart.getObjectByName(cargoSignatures[kind]);
+  assert.ok(signature, `${kind} cargo must retain a recognizable physical load`);
+  assert.ok(
+    signature instanceof THREE.Mesh,
+    `${kind} cargo signature should be rendered geometry`,
+  );
+  disposeDeliveryCartMesh(cart);
+}
+
+const firewoodLog = cartA.getObjectByName('Firewood split log 1') as THREE.Mesh;
+assert.match(
+  (firewoodLog.material as THREE.Material).name,
+  /timber/i,
+  'firewood should use natural timber rather than an orange commodity material',
+);
+const waterBarrel = cartB.getObjectByName('Water barrel') as THREE.Mesh;
+assert.match(
+  (waterBarrel.material as THREE.Material).name,
+  /timber/i,
+  'water should be carried in a wooden barrel rather than a blue token cylinder',
 );
 
 const worker = createDeliveryCartWorkerVisual(84525, deliveryWorkerSources);

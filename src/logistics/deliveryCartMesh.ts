@@ -3,7 +3,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {
   addMesh,
   metalMaterial,
-  quarryRockMaterial,
   timberMaterial,
 } from '../buildings/buildingMaterials.ts';
 import type { DeliveryCargoKind } from './deliveryTrips.ts';
@@ -30,6 +29,9 @@ const CARGO_MATERIALS = {
   apple: createCargoMaterial('Food apples', 0xa84637, 0.9),
   rootVegetable: createCargoMaterial('Food root vegetables', 0xb56f32, 0.94),
   bread: createCargoMaterial('Food bread', 0xb9854f, 0.96),
+  stoneDark: createCargoMaterial('Cargo stone dark', 0x51565c, 0.99),
+  stoneMid: createCargoMaterial('Cargo stone mid', 0x6b7178, 0.99),
+  stoneLight: createCargoMaterial('Cargo stone light', 0x858b91, 0.98),
 } as const;
 
 const CANOPY_PALETTES = [
@@ -328,11 +330,16 @@ function addStoneLoad(group: THREE.Group): void {
     [0.03, 0.65, 0.16, 0.17, 'mid'],
   ] as const;
   for (const [index, [x, y, z, radius, shade]] of rocks.entries()) {
+    const material = shade === 'dark'
+      ? CARGO_MATERIALS.stoneDark
+      : shade === 'light' || shade === 'cut'
+        ? CARGO_MATERIALS.stoneLight
+        : CARGO_MATERIALS.stoneMid;
     addNamedMesh(
       group,
       `Quarried stone ${index + 1}`,
       new THREE.DodecahedronGeometry(radius, 0),
-      quarryRockMaterial(shade),
+      material,
       new THREE.Vector3(x, y, z),
       new THREE.Euler(index * 0.19, index * 0.37, index * 0.11),
       new THREE.Vector3(1, 0.84 + (index % 2) * 0.12, 0.92),
