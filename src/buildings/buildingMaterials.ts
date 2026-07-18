@@ -153,6 +153,8 @@ const BUILDING_TEXTURE_URLS: Record<TextureFamily, { map: string; normalMap: str
 };
 
 const materialCache = new Map<BuildingMaterialKey, THREE.MeshStandardMaterial>();
+const DEFAULT_BUILDING_INDIRECT_INTENSITY = 0.11;
+let buildingIndirectIntensity = DEFAULT_BUILDING_INDIRECT_INTENSITY;
 export type BuildingDetailMaterialKey =
   | 'brass'
   | 'paintRed'
@@ -195,6 +197,7 @@ export function sharedBuildingMaterial(key: BuildingMaterialKey): THREE.MeshStan
     roughness: definition.roughness,
     metalness: definition.metalness,
   });
+  configureBuildingIndirectLight(material);
   material.name = `Shared building material: ${key}`;
   material.userData.sharedBuildingMaterial = true;
   if (definition.textureFamily) {
@@ -203,6 +206,18 @@ export function sharedBuildingMaterial(key: BuildingMaterialKey): THREE.MeshStan
   materialCache.set(key, material);
   applyTextureSet(material, definition);
   return material;
+}
+
+/**
+ * Keeps outdoor building faces readable when they fall outside the direct sun.
+ * The albedo-matched emissive term approximates broad sky/ground bounce without
+ * raising exposure for the already bright terrain and foliage.
+ */
+export function setBuildingIndirectLightIntensity(intensity: number): void {
+  buildingIndirectIntensity = Math.max(0, intensity);
+  for (const material of materialCache.values()) {
+    material.emissiveIntensity = buildingIndirectIntensity;
+  }
 }
 
 /** Shared non-structural materials used by building props and painted trim. */
@@ -283,10 +298,17 @@ function applyTextureSet(material: THREE.MeshStandardMaterial, definition: Mater
   if (!definition.textureFamily || !textureSets) return;
   const set = textureSets[definition.textureFamily];
   material.map = set.map;
+  material.emissiveMap = set.map;
   material.normalMap = set.normalMap;
   material.roughnessMap = set.roughnessMap;
   material.normalScale.setScalar(definition.normalScale ?? 1);
   material.needsUpdate = true;
+}
+
+function configureBuildingIndirectLight(material: THREE.MeshStandardMaterial): void {
+  material.emissive.copy(material.color);
+  material.emissiveIntensity = buildingIndirectIntensity;
+  material.userData.buildingIndirectLight = true;
 }
 
 function applyDetailTextureSet(

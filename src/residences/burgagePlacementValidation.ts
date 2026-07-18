@@ -17,6 +17,7 @@ import {
   measureZoneDepth,
   resolveBurgageLayout,
   suggestPlotCount,
+  type ResidencePlacement,
 } from './burgageLayout.ts';
 import { convexPolygonsOverlap2, isConvexQuad2, polygonArea2 } from '../utils/polygonGeometry.ts';
 import { burgageZoneOverlapsBuildings, overlapsExistingZoneIndexed } from '../placement/placementConflicts.ts';
@@ -41,7 +42,12 @@ export type BurgagePlacementResult =
   | { ok: true; layout: BurgageLayoutResult }
   | { ok: false; reason: BurgagePlacementFailureReason };
 
-const MAX_CORNER_HEIGHT_DELTA = 9.5;
+const MAX_ZONE_HEIGHT_DELTA = 6;
+const MAX_ZONE_EDGE_GRADE = 0.4;
+const MAX_RESIDENCE_FOOTPRINT_HEIGHT_DELTA = 2.4;
+const RESIDENCE_TERRAIN_HALF_WIDTH = 3.85;
+const RESIDENCE_TERRAIN_HALF_DEPTH = 4.2;
+const FOOTPRINT_SAMPLE_FRACTIONS = [-1, 0, 1] as const;
 const MIN_ZONE_AREA = MIN_PLOT_FRONTAGE * 12;
 
 type BurgagePlacementContext = {
@@ -99,8 +105,17 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
   const heights = context.corners.map((corner) => context.getNaturalHeightAt(corner.x, corner.z));
   const minHeight = Math.min(...heights);
   const maxHeight = Math.max(...heights);
-  if (maxHeight - minHeight > MAX_CORNER_HEIGHT_DELTA) {
+  if (maxHeight - minHeight > MAX_ZONE_HEIGHT_DELTA) {
     return { ok: false, reason: 'too_steep' };
+  }
+  for (let index = 0; index < context.corners.length; index++) {
+    const nextIndex = (index + 1) % context.corners.length;
+    const start = context.corners[index];
+    const end = context.corners[nextIndex];
+    const run = Math.hypot(end.x - start.x, end.z - start.z);
+    if (run > 0.1 && Math.abs(heights[nextIndex] - heights[index]) / run > MAX_ZONE_EDGE_GRADE) {
+      return { ok: false, reason: 'too_steep' };
+    }
   }
 
   const cornerPoints = context.corners.map((corner) => ({ x: corner.x, z: corner.z }));
@@ -133,6 +148,12 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
     }
     return { ok: false, reason: 'no_fit' };
   }
+  if (layout.residences.some((residence) => (
+    residenceFootprintHeightDelta(residence, context.getNaturalHeightAt)
+      > MAX_RESIDENCE_FOOTPRINT_HEIGHT_DELTA
+  ))) {
+    return { ok: false, reason: 'too_steep' };
+  }
 
   if (overlapsExistingZone(zoneCorners, context.existingZones, context.gameState)) {
     return { ok: false, reason: 'overlaps_existing' };
@@ -157,6 +178,30 @@ export function validateBurgagePlacement(context: BurgagePlacementContext): Burg
   }
 
   return { ok: true, layout };
+}
+
+export function residenceFootprintHeightDelta(
+  residence: ResidencePlacement,
+  getHeightAt: (x: number, z: number) => number,
+): number {
+  const cos = Math.cos(residence.yaw);
+  const sin = Math.sin(residence.yaw);
+  let minHeight = Infinity;
+  let maxHeight = -Infinity;
+
+  for (const xFraction of FOOTPRINT_SAMPLE_FRACTIONS) {
+    for (const zFraction of FOOTPRINT_SAMPLE_FRACTIONS) {
+      const localX = xFraction * RESIDENCE_TERRAIN_HALF_WIDTH;
+      const localZ = zFraction * RESIDENCE_TERRAIN_HALF_DEPTH;
+      const x = residence.x + localX * cos - localZ * sin;
+      const z = residence.z + localX * sin + localZ * cos;
+      const height = getHeightAt(x, z);
+      minHeight = Math.min(minHeight, height);
+      maxHeight = Math.max(maxHeight, height);
+    }
+  }
+
+  return maxHeight - minHeight;
 }
 
 export function frontageEdgeRoadDistances(

@@ -20,12 +20,14 @@ const tests = [
   'test:farming',
   'test:monastery-polish',
   'test:backyard-gardens',
+  'test:residence-terrain',
   'test:building-art',
   'test:camera-controller',
   'test:client-sync',
   'test:deer-wildlife',
   'test:livestock',
   'test:agent-visuals',
+  'test:worker-agents',
   'test:civic-logistics',
 ] as const;
 

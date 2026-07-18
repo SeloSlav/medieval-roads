@@ -7,6 +7,7 @@ import type { FarmFieldMarkers } from '../farming/FarmFieldMarkers.ts';
 import type { PastureMarkers } from '../farming/PastureMarkers.ts';
 import type { LivestockVisuals } from '../farming/LivestockVisuals.ts';
 import type { GameState } from '../resources/types.ts';
+import type { TreeRegistry } from '../resources/TreeRegistry.ts';
 import type { CrowdViewState } from '../settlement/crowdView.ts';
 
 export type SettlementWorldSyncTargets = {
@@ -19,6 +20,7 @@ export type SettlementWorldSyncTargets = {
   villagers: VillagerRenderer | null;
   getHeightAt: (x: number, z: number) => number;
   getRoadNetwork: () => RoadNetwork | null;
+  getTreeRegistry: () => TreeRegistry | null;
 };
 
 export function syncSettlementWorld(
@@ -55,11 +57,68 @@ export function syncSettlementWorld(
     state.deliveryTrips,
     previous.deliveryTrips,
   );
+  const workerBuildingsChanged = !previous || !mapEntriesMatch(
+    state.buildings,
+    previous.buildings,
+    (current, prior) =>
+      current.kind === prior.kind
+      && current.x === prior.x
+      && current.z === prior.z
+      && current.workRadius === prior.workRadius
+      && current.assignedLabor === prior.assignedLabor,
+  );
+  const workerResourcesChanged = !previous
+    || !mapEntriesMatch(
+      state.quarries,
+      previous.quarries,
+      (current, prior) => current.remaining === prior.remaining,
+    )
+    || !mapEntriesMatch(
+      state.foragingNodes,
+      previous.foragingNodes,
+      (current, prior) => current.remaining === prior.remaining,
+    );
+  const workerTreePhasesChanged = !previous || !mapEntriesMatch(
+    state.trees,
+    previous.trees,
+    (current, prior) => current.phase === prior.phase,
+  );
+  const workerFieldsChanged = !previous || !mapEntriesMatch(
+    state.farmFields,
+    previous.farmFields,
+    (current, prior) =>
+      current.farmsteadId === prior.farmsteadId
+      && current.priority === prior.priority
+      && cornersEqual(current.corners, prior.corners),
+  );
+  const workerPasturesChanged = !previous || !mapEntriesMatch(
+    state.pastures,
+    previous.pastures,
+    (current, prior) =>
+      current.farmsteadId === prior.farmsteadId
+      && cornersEqual(current.corners, prior.corners),
+  );
 
   if (residencesChanged) {
     targets.residenceMarkers?.syncResidences(state.residences.values(), getHeightAt);
+  }
+  if (
+    residencesChanged
+    || workerBuildingsChanged
+    || workerResourcesChanged
+    || workerTreePhasesChanged
+    || workerFieldsChanged
+    || workerPasturesChanged
+  ) {
     targets.villagers?.sync({
       residences: state.residences.values(),
+      buildings: state.buildings.values(),
+      quarries: state.quarries.values(),
+      foragingNodes: state.foragingNodes.values(),
+      trees: state.trees,
+      treeRegistry: targets.getTreeRegistry(),
+      farmFields: state.farmFields.values(),
+      pastures: state.pastures.values(),
       roadNetwork: targets.getRoadNetwork(),
     });
   }
@@ -110,6 +169,32 @@ export function disposeSettlementWorld(
   targets.backyardGardenMarkers?.dispose();
   targets.deliveryAgents?.dispose();
   targets.villagers?.dispose();
+}
+
+function cornersEqual(
+  current: readonly { x: number; z: number }[],
+  previous: readonly { x: number; z: number }[],
+): boolean {
+  if (current.length !== previous.length) return false;
+  return current.every(
+    (point, index) =>
+      point.x === previous[index]?.x
+      && point.z === previous[index]?.z,
+  );
+}
+
+function mapEntriesMatch<K, V>(
+  current: ReadonlyMap<K, V>,
+  previous: ReadonlyMap<K, V>,
+  matches: (current: V, previous: V) => boolean,
+): boolean {
+  if (current === previous) return true;
+  if (current.size !== previous.size) return false;
+  for (const [key, value] of current) {
+    const prior = previous.get(key);
+    if (prior === undefined || !matches(value, prior)) return false;
+  }
+  return true;
 }
 
 function mapEntriesShareValues<K, V>(

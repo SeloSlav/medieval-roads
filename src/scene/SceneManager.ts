@@ -47,6 +47,7 @@ import { createDeerWildlifeVisuals, type DeerWildlifeVisuals } from '../foraging
 import {
   disposeBuildingMaterialLibrary,
   initializeBuildingMaterialLibrary,
+  setBuildingIndirectLightIntensity,
 } from '../buildings/buildingMaterials.ts';
 import {
   disposeVineyardVineResources,
@@ -487,6 +488,7 @@ export class SceneManager {
     this.hemiLight.intensity = state.hemiIntensity;
     this.ambientLight.color.setHex(state.ambientColor);
     this.ambientLight.intensity = state.ambientIntensity;
+    setBuildingIndirectLightIntensity(state.buildingIndirectIntensity);
     this.skyFillLight.color.setHex(state.fillColor);
     this.skyFillLight.intensity = state.fillIntensity;
     this.skyFillLight.position.copy(this.sunDirection).multiplyScalar(-90).add(new THREE.Vector3(0, 65, 0));

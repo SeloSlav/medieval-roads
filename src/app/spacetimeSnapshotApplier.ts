@@ -10,7 +10,7 @@ import { syncSettlementWorld, type SettlementWorldSyncTargets } from './settleme
 import {
   collectPlacedBuildingSources,
   getForestClearanceSignature,
-  getPlacedBuildingSignature,
+  getPlacedTerrainSignature,
   syncPlacedBuildingTerrain,
 } from './placedBuildingTerrainSync.ts';
 
@@ -70,12 +70,14 @@ export class SpacetimeSnapshotApplier {
       }
     }
 
-    if (buildingsChanged) {
-      const buildingSignature = getPlacedBuildingSignature(state.buildings);
-      if (buildingSignature !== this.lastPlacedBuildingSignature) {
-        this.lastPlacedBuildingSignature = buildingSignature;
-        deps.buildingMarkers?.syncBuildings(state.buildings.values());
-        deps.terrainMinimap?.syncBuildings(buildBuildingWorldMapMarkers(state.buildings.values()));
+    if (buildingsChanged || residencesChanged) {
+      const terrainSignature = getPlacedTerrainSignature(state);
+      if (terrainSignature !== this.lastPlacedBuildingSignature) {
+        this.lastPlacedBuildingSignature = terrainSignature;
+        if (buildingsChanged) {
+          deps.buildingMarkers?.syncBuildings(state.buildings.values());
+          deps.terrainMinimap?.syncBuildings(buildBuildingWorldMapMarkers(state.buildings.values()));
+        }
         syncPlacedBuildingTerrain({
           sceneManager: deps.sceneManager,
           gameState: state,
@@ -89,7 +91,7 @@ export class SpacetimeSnapshotApplier {
     }
 
     syncSettlementWorld(deps.settlementWorld, state, previous);
-    if (burgageZonesChanged || residencesChanged) {
+    if (burgageZonesChanged || residencesChanged || buildingsChanged) {
       deps.burgageFencing?.syncZones(
         state.burgageZones.values(),
         state.residences.values(),

@@ -48,6 +48,7 @@ const schedule = deriveSettlementSchedule(
 );
 assert.equal(schedule.laborPaused, true);
 assert.equal(schedule.dayNight.smokeAllowed, false);
+assert.equal(schedule.dayNight.isNight, true);
 
 const daySchedule = deriveSettlementSchedule(
   { simTick: workHourTick, parishPolicy: DEFAULT_PARISH_POLICY },
@@ -55,6 +56,13 @@ const daySchedule = deriveSettlementSchedule(
 );
 assert.equal(daySchedule.laborPaused, false);
 assert.equal(daySchedule.dayNight.smokeAllowed, true);
+assert.equal(daySchedule.dayNight.isNight, false);
+assert.ok(
+  daySchedule.dayNight.buildingIndirectIntensity > schedule.dayNight.buildingIndirectIntensity,
+  'daylight should provide more indirect building-face light than night',
+);
+assert.ok(daySchedule.dayNight.buildingIndirectIntensity >= 0.1);
+assert.ok(schedule.dayNight.buildingIndirectIntensity <= 0.03);
 
 const gameState = {
   buildings: new Map([

@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as THREE from 'three';
 import { createBuildingMesh } from '../src/buildings/BuildingMeshes.ts';
-import { getBuildingMaterialLibraryStats } from '../src/buildings/buildingMaterials.ts';
+import {
+  getBuildingMaterialLibraryStats,
+  setBuildingIndirectLightIntensity,
+} from '../src/buildings/buildingMaterials.ts';
 import { BUILDING_KINDS } from '../src/generated/gameBalance.ts';
 import { createResidenceMesh } from '../src/residences/ResidenceMarkers.ts';
 import { BUILD_MENU_ENTRIES, renderBuildMenuCards } from '../src/ui/buildMenuCards.ts';
@@ -147,6 +150,26 @@ if (finalStats.constructionMaterials < 15 || finalStats.constructionMaterials > 
 }
 if (sharedMaterials.size > 29) {
   throw new Error(`Buildings and residences exceeded the 29 shared material ceiling (${sharedMaterials.size}).`);
+}
+
+const indirectConstructionMaterials = [...sharedMaterials].filter(
+  (material): material is THREE.MeshStandardMaterial =>
+    material instanceof THREE.MeshStandardMaterial
+    && material.name.startsWith('Shared building material:'),
+);
+if (indirectConstructionMaterials.length < 15) {
+  throw new Error(`Expected at least 15 indirect-lit construction materials; found ${indirectConstructionMaterials.length}.`);
+}
+if (indirectConstructionMaterials.some((material) =>
+  material.userData.buildingIndirectLight !== true
+  || material.emissiveIntensity < 0.1
+  || material.emissive.equals(new THREE.Color(0x000000))
+)) {
+  throw new Error('Every shared construction material must retain a visible daylight bounce contribution.');
+}
+setBuildingIndirectLightIntensity(0.025);
+if (indirectConstructionMaterials.some((material) => material.emissiveIntensity !== 0.025)) {
+  throw new Error('Day/night lighting must update every shared construction material.');
 }
 
 console.log(`building art-direction tests passed (${urls.length} cards, ${BUILDING_KINDS.length} models, ${residenceCount} residence variants, ${sharedMaterials.size} shared materials, ${texturedMeshCount} metric-UV meshes)`);

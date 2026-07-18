@@ -43,22 +43,25 @@ export function computeRoadSlotBudget(network: RoadNetwork | null): number {
 export function computeVillagerSlots(
   residences: readonly ResidenceState[],
   roadNetwork: RoadNetwork | null = null,
+  populationByResidence?: ReadonlyMap<string, number>,
+  maxSlots = MAX_VILLAGERS_TOTAL,
 ): Map<string, number> {
   const slots = new Map<string, number>();
   let total = 0;
 
   for (const residence of residences) {
-    if (residence.abandoned || residence.population <= 0) continue;
+    const population = populationByResidence?.get(residence.id) ?? residence.population;
+    if (residence.abandoned || population <= 0) continue;
     const count = Math.min(
       MAX_VILLAGERS_PER_RESIDENCE,
-      Math.max(1, Math.ceil(residence.population / POPULATION_DENSITY_RATIO)),
+      Math.max(1, Math.ceil(population / POPULATION_DENSITY_RATIO)),
     );
     slots.set(residence.id, count);
     total += count;
   }
 
   const roadBudget = computeRoadSlotBudget(roadNetwork);
-  const cap = Math.min(MAX_VILLAGERS_TOTAL, roadBudget);
+  const cap = Math.max(0, Math.min(MAX_VILLAGERS_TOTAL, roadBudget, maxSlots));
   if (total <= cap) return slots;
 
   const entries = [...slots.entries()].sort((a, b) => b[1] - a[1]);

@@ -8,6 +8,12 @@ export type BuildingTerrainSource = {
   z: number;
 };
 
+export type ResidenceTerrainSource = {
+  x: number;
+  z: number;
+  yaw: number;
+};
+
 type BuildingPadParams = {
   radiusX: number;
   radiusZ: number;
@@ -15,9 +21,13 @@ type BuildingPadParams = {
   outerFade: number;
 };
 
-type BuildingPadSite = BuildingTerrainSource & BuildingPadParams & {
+type TerrainPadSite = BuildingPadParams & {
+  x: number;
+  z: number;
   rotation: number;
   platformHeight: number;
+  shape: 'ellipse' | 'box';
+  maxRaise?: number;
 };
 
 const PAD_PARAMS: Record<BuildingKind, BuildingPadParams> = {
@@ -49,11 +59,18 @@ const PAD_PARAMS: Record<BuildingKind, BuildingPadParams> = {
 const FOOTPRINT_SAMPLE_FRACTIONS = [0, 0.55, 0.82, 1] as const;
 /** Matches placement preview silhouette scale in BuildingPlacementPreview. */
 const FOOTPRINT_PREVIEW_SCALE = 0.92;
+const RESIDENCE_PAD_PARAMS: BuildingPadParams = {
+  radiusX: 4.3,
+  radiusZ: 4.7,
+  innerFade: 0.9,
+  outerFade: 1.35,
+};
+const RESIDENCE_PAD_SAMPLE_FRACTIONS = [-1, -0.5, 0, 0.5, 1] as const;
 
 export class BuildingTerrainLayout {
-  readonly sites: BuildingPadSite[];
+  readonly sites: TerrainPadSite[];
 
-  private constructor(sites: BuildingPadSite[]) {
+  private constructor(sites: TerrainPadSite[]) {
     this.sites = sites;
   }
 
@@ -61,9 +78,24 @@ export class BuildingTerrainLayout {
     buildings: Iterable<BuildingTerrainSource>,
     sampleNaturalHeight: (x: number, z: number) => number,
   ): BuildingTerrainLayout {
-    const sites: BuildingPadSite[] = [];
+    const sites: TerrainPadSite[] = [];
     for (const building of buildings) {
-      sites.push(createPadSite(building, sampleNaturalHeight));
+      sites.push(createBuildingPadSite(building, sampleNaturalHeight));
+    }
+    return new BuildingTerrainLayout(sites);
+  }
+
+  static fromSettlement(
+    buildings: Iterable<BuildingTerrainSource>,
+    residences: Iterable<ResidenceTerrainSource>,
+    sampleNaturalHeight: (x: number, z: number) => number,
+  ): BuildingTerrainLayout {
+    const sites: TerrainPadSite[] = [];
+    for (const building of buildings) {
+      sites.push(createBuildingPadSite(building, sampleNaturalHeight));
+    }
+    for (const residence of residences) {
+      sites.push(createResidencePadSite(residence, sampleNaturalHeight));
     }
     return new BuildingTerrainLayout(sites);
   }
@@ -151,28 +183,63 @@ export function sampleBuildingFootprintPoints(
   return points;
 }
 
-function createPadSite(
+function createBuildingPadSite(
   building: BuildingTerrainSource,
   sampleNaturalHeight: (x: number, z: number) => number,
-): BuildingPadSite {
+): TerrainPadSite {
   const params = PAD_PARAMS[building.kind];
   const rotation = buildingPlacementYaw(building.kind, building.x, building.z);
   const footprintHeights = sampleBuildingFootprintHeights(building.kind, building.x, building.z, sampleNaturalHeight);
   const platformHeight = Math.max(...footprintHeights);
 
   return {
-    ...building,
+    x: building.x,
+    z: building.z,
     ...params,
     rotation,
     platformHeight,
+    shape: 'ellipse',
   };
 }
 
-function sampleSiteRaise(x: number, z: number, site: BuildingPadSite, naturalHeight: number): number {
+function createResidencePadSite(
+  residence: ResidenceTerrainSource,
+  sampleNaturalHeight: (x: number, z: number) => number,
+): TerrainPadSite {
+  const { radiusX, radiusZ, innerFade } = RESIDENCE_PAD_PARAMS;
+  const cos = Math.cos(residence.yaw);
+  const sin = Math.sin(residence.yaw);
+  let platformHeight = -Infinity;
+
+  for (const xFraction of RESIDENCE_PAD_SAMPLE_FRACTIONS) {
+    for (const zFraction of RESIDENCE_PAD_SAMPLE_FRACTIONS) {
+      const localX = xFraction * radiusX * innerFade;
+      const localZ = zFraction * radiusZ * innerFade;
+      const x = residence.x + localX * cos - localZ * sin;
+      const z = residence.z + localX * sin + localZ * cos;
+      platformHeight = Math.max(platformHeight, sampleNaturalHeight(x, z));
+    }
+  }
+
+  return {
+    x: residence.x,
+    z: residence.z,
+    ...RESIDENCE_PAD_PARAMS,
+    rotation: residence.yaw,
+    platformHeight,
+    shape: 'box',
+    maxRaise: 2.4,
+  };
+}
+
+function sampleSiteRaise(x: number, z: number, site: TerrainPadSite, naturalHeight: number): number {
   const blend = sampleSiteBlend(x, z, site, site.innerFade, site.outerFade);
   if (blend <= 0) return 0;
 
-  const needed = site.platformHeight - naturalHeight;
+  const needed = Math.min(
+    site.maxRaise ?? Number.POSITIVE_INFINITY,
+    site.platformHeight - naturalHeight,
+  );
   if (needed <= 0) return 0;
 
   return blend * needed;
@@ -181,7 +248,7 @@ function sampleSiteRaise(x: number, z: number, site: BuildingPadSite, naturalHei
 function sampleSiteBlend(
   x: number,
   z: number,
-  site: BuildingPadSite,
+  site: TerrainPadSite,
   innerFade: number,
   outerFade: number,
 ): number {
@@ -191,11 +258,15 @@ function sampleSiteBlend(
   const sin = Math.sin(site.rotation);
   const localX = dx * cos + dz * sin;
   const localZ = -dx * sin + dz * cos;
-  const normDist = Math.hypot(localX / site.radiusX, localZ / site.radiusZ);
+  const normX = Math.abs(localX / site.radiusX);
+  const normZ = Math.abs(localZ / site.radiusZ);
+  const normDist = site.shape === 'box'
+    ? Math.max(normX, normZ)
+    : Math.hypot(normX, normZ);
   return 1 - smoothstep(innerFade, outerFade, normDist);
 }
 
-function siteBounds(site: BuildingPadSite): TerrainBounds {
+function siteBounds(site: TerrainPadSite): TerrainBounds {
   const extentX = site.radiusX * site.outerFade;
   const extentZ = site.radiusZ * site.outerFade;
   const cornerRadius = Math.hypot(extentX, extentZ);

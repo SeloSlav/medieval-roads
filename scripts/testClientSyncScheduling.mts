@@ -196,6 +196,7 @@ function testSettlementSyncSkipsUnchangedDomains(): void {
     villagers: { sync: () => { calls.villagers += 1; } },
     getHeightAt: () => 0,
     getRoadNetwork: () => null,
+    getTreeRegistry: () => null,
   };
 
   syncSettlementWorld(targets as never, current, previous);
@@ -254,6 +255,7 @@ function testTreeVisualSyncSkipsUnchangedSnapshots(): void {
       villagers: null,
       getHeightAt: () => 0,
       getRoadNetwork: () => null,
+      getTreeRegistry: () => null,
     },
     onForestClearanceChanged: () => {
       forestClearanceCalls += 1;

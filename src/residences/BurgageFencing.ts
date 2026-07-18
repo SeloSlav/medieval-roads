@@ -18,11 +18,20 @@ const MAX_POSTS = 640;
 const MAX_RAILS = 1920;
 const POST_SPACING = 2.2;
 const POST_HEIGHT = 1.08;
+const POST_BURY_DEPTH = 0.22;
 const RAIL_HEIGHTS = [0.34, 0.64, 0.9] as const;
-const TERRAIN_LIFT = 0.14;
+const TERRAIN_LIFT = 0.06;
 const FRONT_GATE_WIDTH = 1.8;
+const LOCAL_RAIL_AXIS = new THREE.Vector3(0, 0, 1);
 
 type FenceSegment = readonly [Point2, Point2];
+export type TerrainFenceBay = {
+  start: Point2;
+  end: Point2;
+  startGroundHeight: number;
+  endGroundHeight: number;
+};
+
 type FencedResidence = {
   id: string;
   zoneId: string;
@@ -32,10 +41,49 @@ type FencedResidence = {
   yaw: number;
 };
 
-function fenceSignature(segments: FenceSegment[]): string {
-  return segments
-    .map(([start, end]) => `${start.x.toFixed(2)},${start.z.toFixed(2)}-${end.x.toFixed(2)},${end.z.toFixed(2)}`)
+function fenceSignature(segmentBays: TerrainFenceBay[][]): string {
+  return segmentBays
+    .flat()
+    .map((bay) => [
+      bay.start.x.toFixed(2),
+      bay.start.z.toFixed(2),
+      bay.startGroundHeight.toFixed(3),
+      bay.end.x.toFixed(2),
+      bay.end.z.toFixed(2),
+      bay.endGroundHeight.toFixed(3),
+    ].join(','))
     .join('|');
+}
+
+export function sampleTerrainFenceBays(
+  start: Point2,
+  end: Point2,
+  getHeightAt: (x: number, z: number) => number,
+): TerrainFenceBay[] {
+  const dx = end.x - start.x;
+  const dz = end.z - start.z;
+  const length = Math.hypot(dx, dz);
+  if (length < 0.5) return [];
+
+  const bayCount = Math.max(1, Math.ceil(length / POST_SPACING));
+  const points = Array.from({ length: bayCount + 1 }, (_, index) => {
+    const t = index / bayCount;
+    const point = {
+      x: start.x + dx * t,
+      z: start.z + dz * t,
+    };
+    return {
+      point,
+      groundHeight: getHeightAt(point.x, point.z),
+    };
+  });
+
+  return Array.from({ length: bayCount }, (_, index) => ({
+    start: points[index].point,
+    end: points[index + 1].point,
+    startGroundHeight: points[index].groundHeight,
+    endGroundHeight: points[index + 1].groundHeight,
+  }));
 }
 
 function residencesByZone(
@@ -119,6 +167,7 @@ export class BurgageFencing {
   private readonly position = new THREE.Vector3();
   private readonly quaternion = new THREE.Quaternion();
   private readonly scale = new THREE.Vector3();
+  private readonly railDirection = new THREE.Vector3();
   private lastSignature = '';
 
   constructor(parent: THREE.Group) {
@@ -157,49 +206,69 @@ export class BurgageFencing {
     getHeightAt: (x: number, z: number) => number,
   ): void {
     const segments = collectFenceSegments(zones, residences);
-    const signature = fenceSignature(segments);
+    const segmentBays = segments.map(([start, end]) => (
+      sampleTerrainFenceBays(start, end, getHeightAt)
+    ));
+    const signature = fenceSignature(segmentBays);
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
 
     let postCount = 0;
     let railCount = 0;
 
-    for (const [start, end] of segments) {
-      if (postCount >= MAX_POSTS || railCount >= MAX_RAILS) break;
+    for (const bays of segmentBays) {
+      if (bays.length === 0) continue;
+      const availableBays = Math.min(
+        bays.length,
+        MAX_POSTS - postCount - 1,
+        Math.floor((MAX_RAILS - railCount) / RAIL_HEIGHTS.length),
+      );
+      if (availableBays <= 0) break;
 
-      const dx = end.x - start.x;
-      const dz = end.z - start.z;
-      const length = Math.hypot(dx, dz);
-      if (length < 0.5) continue;
-
-      const dirX = dx / length;
-      const dirZ = dz / length;
-      const yaw = Math.atan2(dirX, dirZ);
-      this.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-
-      const postSteps = Math.max(2, Math.floor(length / POST_SPACING) + 1);
-      for (let step = 0; step < postSteps && postCount < MAX_POSTS; step++) {
-        const t = step / (postSteps - 1);
-        const x = start.x + dirX * length * t;
-        const z = start.z + dirZ * length * t;
-        const y = getHeightAt(x, z) + TERRAIN_LIFT + POST_HEIGHT * 0.5;
-        this.scale.set(0.13, POST_HEIGHT, 0.13);
-        this.position.set(x, y, z);
+      this.quaternion.identity();
+      const postMeshHeight = POST_HEIGHT + POST_BURY_DEPTH;
+      for (let index = 0; index <= availableBays; index++) {
+        const bay = index === 0 ? bays[0] : bays[index - 1];
+        const point = index === 0 ? bay.start : bay.end;
+        const groundHeight = index === 0 ? bay.startGroundHeight : bay.endGroundHeight;
+        const y = groundHeight + (POST_HEIGHT - POST_BURY_DEPTH) * 0.5;
+        this.scale.set(0.13, postMeshHeight, 0.13);
+        this.position.set(point.x, y, point.z);
         this.matrix.compose(this.position, this.quaternion, this.scale);
         this.posts.setMatrixAt(postCount, this.matrix);
         postCount += 1;
       }
 
-      const midX = (start.x + end.x) * 0.5;
-      const midZ = (start.z + end.z) * 0.5;
-      for (const railHeight of RAIL_HEIGHTS) {
-        if (railCount >= MAX_RAILS) break;
-        const y = getHeightAt(midX, midZ) + TERRAIN_LIFT + railHeight;
-        this.scale.set(0.07, 0.055, length);
-        this.position.set(midX, y, midZ);
-        this.matrix.compose(this.position, this.quaternion, this.scale);
-        this.rails.setMatrixAt(railCount, this.matrix);
-        railCount += 1;
+      for (let index = 0; index < availableBays; index++) {
+        const bay = bays[index];
+        this.railDirection.set(
+          bay.end.x - bay.start.x,
+          bay.endGroundHeight - bay.startGroundHeight,
+          bay.end.z - bay.start.z,
+        );
+        const railLength = this.railDirection.length();
+        if (railLength <= 1e-6) continue;
+        this.quaternion.setFromUnitVectors(
+          LOCAL_RAIL_AXIS,
+          this.railDirection.multiplyScalar(1 / railLength),
+        );
+        this.position.set(
+          (bay.start.x + bay.end.x) * 0.5,
+          (bay.startGroundHeight + bay.endGroundHeight) * 0.5 + TERRAIN_LIFT,
+          (bay.start.z + bay.end.z) * 0.5,
+        );
+
+        for (const railHeight of RAIL_HEIGHTS) {
+          this.scale.set(0.07, 0.055, railLength);
+          this.position.y = (
+            (bay.startGroundHeight + bay.endGroundHeight) * 0.5
+            + TERRAIN_LIFT
+            + railHeight
+          );
+          this.matrix.compose(this.position, this.quaternion, this.scale);
+          this.rails.setMatrixAt(railCount, this.matrix);
+          railCount += 1;
+        }
       }
     }
 

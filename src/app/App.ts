@@ -158,6 +158,13 @@ export class App {
           if (this.gameState && this.villagers && this.roadNetwork) {
             this.villagers.sync({
               residences: this.gameState.residences.values(),
+              buildings: this.gameState.buildings.values(),
+              quarries: this.gameState.quarries.values(),
+              foragingNodes: this.gameState.foragingNodes.values(),
+              trees: this.gameState.trees,
+              treeRegistry: this.treeRegistry,
+              farmFields: this.gameState.farmFields.values(),
+              pastures: this.gameState.pastures.values(),
               roadNetwork: this.roadNetwork,
             });
           }
@@ -227,6 +234,7 @@ export class App {
         villagers: this.villagers,
         getHeightAt: (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
         getRoadNetwork: () => this.roadNetwork,
+        getTreeRegistry: () => this.treeRegistry,
       },
       onForestClearanceChanged: () => this.syncForestClearance(),
     };
@@ -305,6 +313,7 @@ export class App {
       villagers: this.villagers,
       getHeightAt: () => 0,
       getRoadNetwork: () => null,
+      getTreeRegistry: () => null,
     });
     this.burgageFencing?.dispose();
     this.gameRuntime?.dispose();
@@ -403,6 +412,12 @@ export class App {
     this.worldMapUi?.minimap.syncBuildings(
       buildBuildingWorldMapMarkers(this.gameState.buildings.values()),
     );
+    syncPlacedBuildingTerrain({
+      sceneManager: this.sceneManager,
+      gameState: this.gameState,
+      buildingMarkers: this.buildingMarkers,
+      forceMeshUpdate: true,
+    });
     if (this.snapshotApplierDeps) {
       syncSettlementWorld(this.snapshotApplierDeps.settlementWorld, this.gameState);
     }
@@ -411,12 +426,6 @@ export class App {
       this.gameState.residences.values(),
       (x, z) => this.sceneManager?.terrain.getHeightAt(x, z) ?? 0,
     );
-    syncPlacedBuildingTerrain({
-      sceneManager: this.sceneManager,
-      gameState: this.gameState,
-      buildingMarkers: this.buildingMarkers,
-      forceMeshUpdate: true,
-    });
     this.syncForestClearance();
     this.syncResourceUi();
     this.exposeDevHandles();

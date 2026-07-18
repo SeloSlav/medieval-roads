@@ -24,6 +24,7 @@ export type DayNightLightingState = {
   hemiIntensity: number;
   ambientColor: number;
   ambientIntensity: number;
+  buildingIndirectIntensity: number;
   fillColor: number;
   fillIntensity: number;
   fogColor: number;
@@ -59,10 +60,12 @@ export function computeDayNightState(
     { at: CALENDAR_WORK_END_HOUR + 1.5, value: 0 },
   ]);
   const night = blendPhases(hour, [
-    { at: CALENDAR_WORK_END_HOUR, value: 0 },
-    { at: CALENDAR_WORK_END_HOUR + 2, value: 1 },
+    { at: 0, value: 1 },
     { at: CALENDAR_WORK_START_HOUR - 1, value: 1 },
     { at: CALENDAR_WORK_START_HOUR + 0.5, value: 0 },
+    { at: CALENDAR_WORK_END_HOUR, value: 0 },
+    { at: CALENDAR_WORK_END_HOUR + 2, value: 1 },
+    { at: CALENDAR_HOURS_PER_DAY, value: 1 },
   ]);
 
   const dayAmount = clamp01(1 - night * 0.92);
@@ -95,6 +98,7 @@ export function computeDayNightState(
   const hemiIntensity = lerp(0.55, 1.9, dayAmount);
   const ambientColor = lerpColor(0x4a628f, 0xb8d1ff, dayAmount);
   const ambientIntensity = lerp(0.12, 0.2, dayAmount) + night * 0.08;
+  const buildingIndirectIntensity = lerp(0.018, 0.11, dayAmount);
   const fillColor = lerpColor(0x5f7fb8, 0x9fc8ff, dayAmount);
   const fillIntensity = lerp(0.18, 0.45, dayAmount);
   const fogColor = lerpColor(0x1b2740, 0xc8def1, dayAmount);
@@ -110,6 +114,7 @@ export function computeDayNightState(
     hemiIntensity,
     ambientColor,
     ambientIntensity,
+    buildingIndirectIntensity,
     fillColor,
     fillIntensity,
     fogColor,
