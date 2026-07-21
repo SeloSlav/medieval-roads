@@ -91,16 +91,7 @@ fn dispatch_reserved_stock(
     if physical_reserved <= 1e-6 || site_has_inbound_cargo(ctx, site.id, commodity) {
         return;
     }
-    let diagnostic_tick = clock.sim_tick % 25 == 0;
     let Some(network) = tick.road_network(site.owner) else {
-        if diagnostic_tick {
-            log::warn!(
-                "construction dispatch site={} commodity={:?} blocked=no-road-network reserved={}",
-                site.id,
-                commodity,
-                physical_reserved,
-            );
-        }
         return;
     };
     let allow_offroad = building_def(&site.kind).is_some_and(|def| !def.requires_road);
@@ -127,34 +118,8 @@ fn dispatch_reserved_stock(
             .then_with(|| left.id.cmp(&right.id))
     });
 
-    if diagnostic_tick {
-        log::warn!(
-            "construction dispatch site={} commodity={:?} reserved={} sources={} free_haulers={} paused={}",
-            site.id,
-            commodity,
-            physical_reserved,
-            sources.len(),
-            available_construction_haulers(ctx, site.owner),
-            labor_and_logistics_paused(ctx, site.owner, clock),
-        );
-    }
-
     for mut source in sources {
         let free_haulers = available_construction_haulers(ctx, site.owner);
-        if diagnostic_tick {
-            log::warn!(
-                "construction source={} kind={} labor={} stock={} active={} route={} free_haulers={}",
-                source.id,
-                source.kind,
-                source.assigned_labor,
-                building_commodity_stock(&source, commodity),
-                building_has_active_trip(ctx, source.id),
-                network
-                    .road_path_route(source.x, source.z, site.x, site.z)
-                    .is_some(),
-                free_haulers,
-            );
-        }
         if try_start_construction_supply_trip(
             ctx,
             clock,

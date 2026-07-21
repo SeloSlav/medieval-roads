@@ -247,7 +247,11 @@ impl RoadNetwork {
             let Some(&best) = dist.get(&node_id) else {
                 continue;
             };
-            if (heap_key as f64 / 1000.0) > best + 1e-6 {
+            // Heap keys are millimetre-quantized because `f64` has no total
+            // ordering. Compare in that same domain: converting the rounded
+            // key back to metres can make a newly inserted entry appear stale
+            // whenever its distance rounds upward.
+            if heap_key > cost_to_key(best) {
                 continue;
             }
             let cost = best;
@@ -698,5 +702,29 @@ mod tests {
         assert!(!network.road_connected(0.0, 0.0, 100.0, 0.0));
         assert!((network.road_path_distance(0.0, 0.0, 20.0, 0.0).unwrap() - 20.0).abs() < 1e-9);
         assert!(network.is_on_road_surface(100.0, 2.9));
+    }
+
+    #[test]
+    fn route_search_keeps_fresh_entries_whose_access_cost_rounds_up() {
+        let network = RoadNetwork::from_snapshot_json(
+            r#"{
+                "nodes": [
+                    {"id":"a","position":[0.0,0.0,0.0]},
+                    {"id":"b","position":[10.0,0.0,0.0]}
+                ],
+                "edges": [{
+                    "startNodeId":"a",
+                    "endNodeId":"b",
+                    "width":4.2,
+                    "sampledPath":[[0.0,0.0,0.0],[10.0,0.0,0.0]]
+                }]
+            }"#,
+        )
+        .expect("valid road snapshot");
+
+        // sqrt(2.0006^2 + 1^2) rounds upward at millimetre precision. The
+        // former stale-entry check rejected this initial queue entry.
+        let route = network.road_path_route(-2.0006, 1.0, 12.0, 1.0);
+        assert!(route.is_some(), "connected off-road access legs must route");
     }
 }

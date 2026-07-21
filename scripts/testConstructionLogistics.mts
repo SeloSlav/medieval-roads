@@ -71,6 +71,18 @@ assert.doesNotMatch(
   'unstaffed completed sources must remain eligible for construction pickup',
 );
 
+const roadNetworkServer = read('server/src/roads/network.rs');
+assert.match(
+  roadNetworkServer,
+  /heap_key\s*>\s*cost_to_key\(best\)/,
+  'road search must compare stale heap entries in the same quantized domain',
+);
+assert.doesNotMatch(
+  roadNetworkServer,
+  /heap_key as f64 \/ 1000\.0\)\s*>\s*best/,
+  'rounding a heap key back to metres can reject a fresh connected route',
+);
+
 const deliveryServer = read('server/src/simulation/delivery_trips.rs');
 const constructionTrip = deliveryServer.slice(
   deliveryServer.indexOf('pub fn try_start_construction_supply_trip'),
