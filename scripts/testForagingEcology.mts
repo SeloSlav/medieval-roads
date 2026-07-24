@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { validateBuildingPlacement } from '../src/buildings/BuildingPlacementValidation.ts';
 import {
@@ -189,6 +189,27 @@ const mushroomVisuals = readFileSync(
 assert.match(mushroomVisuals, /InstancedMesh/);
 assert.match(mushroomVisuals, /CLOSE_WORLD_MAX_CAMERA_DISTANCE/);
 assert.match(mushroomVisuals, /placement\.visibilityNoise\s*<\s*ratio/);
+
+const berryVisuals = readFileSync(
+  `${projectRoot}src/foraging/BerryPatchVisuals.ts`,
+  'utf8',
+);
+assert.match(berryVisuals, /raspberry_patch_albedo\.png/);
+assert.match(berryVisuals, /raspberryMatrices/);
+assert.doesNotMatch(berryVisuals, /createHarvestableBerryGeometry|appendBerryIcosahedron|Bright red harvestable/);
+assert.ok(existsSync(
+  `${projectRoot}public/assets/textures/vegetation/raspberry_patch_albedo.png`,
+));
+
+const undergrowthVisuals = readFileSync(
+  `${projectRoot}src/props/ForestUndergrowth.ts`,
+  'utf8',
+);
+assert.match(
+  undergrowthVisuals,
+  /juniper_scrub_albedo\.png/,
+  'ordinary juniper undergrowth must keep its original texture',
+);
 
 const deerVisuals = readFileSync(
   `${projectRoot}src/foraging/DeerWildlifeVisuals.ts`,
